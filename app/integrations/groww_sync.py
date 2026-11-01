@@ -45,9 +45,60 @@ class GrowwWatchlistSync:
 
     GROWW_BASE_URL = "https://groww.in/v1/api/stocks_data/v1/watchlist"
 
-    def __init__(self, auth_token: Optional[str] = None):
-        """Initialize with Groww JWT / Bearer token (or cookie token)."""
+    def __init__(
+        self,
+        auth_token: Optional[str] = None,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
+        totp_secret: Optional[str] = None,
+    ):
+        """Initialize with Groww JWT / Bearer token or automated TOTP credentials."""
         self.auth_token = auth_token.strip() if auth_token else None
+        self.email = email.strip() if email else None
+        self.password = password.strip() if password else None
+        self.totp_secret = totp_secret.strip() if totp_secret else None
+
+        # If credentials provided, attempt automated session generation if token is missing
+        if not self.auth_token and self.email and self.password and self.totp_secret:
+            fresh = self.login_with_totp(self.email, self.password, self.totp_secret)
+            if fresh:
+                self.auth_token = fresh
+
+    @classmethod
+    def login_with_totp(cls, email: str, password: str, totp_secret: str) -> Optional[str]:
+        """Automatically perform headless login using Email, Password and TOTP.
+        
+        Uses pyotp to generate a fresh 6-digit TOTP code on every run, so the session
+        never permanently expires.
+        """
+        try:
+            import pyotp
+            totp = pyotp.TOTP(totp_secret.strip())
+            totp_code = totp.now()
+
+            login_url = "https://groww.in/v1/api/auth/v1/login"
+            payload = {
+                "email": email.strip(),
+                "password": password.strip(),
+                "totp": totp_code,
+            }
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ),
+            }
+            resp = requests.post(login_url, json=payload, headers=headers, timeout=12)
+            if resp.status_code == 200:
+                data = resp.json()
+                token = data.get("token") or data.get("jwt") or data.get("accessToken")
+                if token:
+                    logger.info("Successfully renewed Groww session token via automated TOTP.")
+                    return token
+        except Exception as exc:
+            logger.warning("Automated Groww TOTP login failed: %s", exc)
+        return None
 
     def _get_headers(self) -> Dict[str, str]:
         token = self.auth_token or ""
@@ -135,7 +186,15 @@ class GrowwWatchlistSync:
         try:
             # 1. Fetch user's existing watchlists
             resp = requests.get(f"{self.GROWW_BASE_URL}/user_watchlists", headers=headers, timeout=10)
-            if resp.status_code == 401 or resp.status_code == 403:
+            if resp.status_code in (401, 403) and self.email and self.password and self.totp_secret:
+                logger.info("Groww token expired. Attempting automatic renewal via TOTP...")
+                fresh_token = self.login_with_totp(self.email, self.password, self.totp_secret)
+                if fresh_token:
+                    self.auth_token = fresh_token
+                    headers = self._get_headers()
+                    resp = requests.get(f"{self.GROWW_BASE_URL}/user_watchlists", headers=headers, timeout=10)
+
+            if resp.status_code in (401, 403):
                 return GrowwSyncResult(
                     success=False,
                     bullish_synced=0,

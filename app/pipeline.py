@@ -153,7 +153,12 @@ def run_pipeline(
         try:
             from app.database.models import CandidateClassification
             from app.integrations.groww_sync import GrowwWatchlistSync
-            groww_sync = GrowwWatchlistSync(auth_token=settings.groww_auth_token)
+            groww_sync = GrowwWatchlistSync(
+                auth_token=settings.groww_auth_token,
+                email=settings.groww_email,
+                password=settings.groww_password,
+                totp_secret=settings.groww_totp_secret,
+            )
 
             top_bull_items = []
             top_bear_items = []

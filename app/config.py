@@ -47,6 +47,9 @@ class Settings(BaseSettings):
 
     # ── Groww Integration ───────────────────────────────────────────────
     groww_auth_token: Optional[str] = None
+    groww_email: Optional[str] = None
+    groww_password: Optional[str] = None
+    groww_totp_secret: Optional[str] = None
 
     # ── Database ────────────────────────────────────────────────────────
     database_url: str = "sqlite:///data/newsedge.db"
