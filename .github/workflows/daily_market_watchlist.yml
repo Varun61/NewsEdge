@@ -1,0 +1,79 @@
+name: NewsEdge Daily Market Watchlist Pipeline
+
+on:
+  schedule:
+    # 07:00 AM IST (Monday to Friday) = 01:30 AM UTC
+    - cron: '30 1 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: 'Lookback window in hours'
+        required: false
+        default: '24'
+      fresh_rebuild:
+        description: 'Wipe old temporary analyses for fresh watchlist'
+        type: boolean
+        default: true
+
+jobs:
+  run-pipeline:
+    name: Run NewsEdge Intelligence Pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install and Launch Ollama Daemon
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          sleep 4
+          ollama pull llama3.2
+
+      - name: Initialize Database and NSE Equity Universe
+        run: |
+          python -m scripts.initialize_database
+
+      - name: Run Historical Benchmark Verification
+        run: |
+          python -m scripts.evaluate_historical_reactions
+
+      - name: Run NewsEdge Daily Watchlist Pipeline
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GROWW_AUTH_TOKEN: ${{ secrets.GROWW_AUTH_TOKEN }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          python -m app.pipeline --cron --hours ${{ github.event.inputs.hours || '24' }}
+
+      - name: Upload Daily Market Reports & Watchlist Exports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: newsedge-market-reports-${{ github.run_id }}
+          path: |
+            reports/*.html
+            reports/*.xlsx
+            reports/groww_bullish_watchlist.txt
+            reports/groww_bearish_watchlist.txt
+            reports/groww_watchlist_import.csv
+          retention-days: 14
