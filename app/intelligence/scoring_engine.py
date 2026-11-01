@@ -151,30 +151,59 @@ class ScoringEngine:
             penalties["unconfirmed_single_source"] = -5.0
         if classification.confidence < 50.0:
             penalties["low_confidence_identification"] = -10.0
+        # Routine / low-signal news: cap impact
+        if classification.news_category in ("BUSINESS_UPDATE", "OTHER", "SHAREHOLDING_CHANGE") and \
+                classification.impact_score < 65.0:
+            penalties["routine_low_signal"] = -8.0
 
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 
-        # 5. Determine Classification Priority
+        # 5. Hard minimum-confidence gate — if we can't verify the company, exclude from watchlist
+        if classification.confidence < 52.0 and final_score < 72.0:
+            candidate_class = CandidateClassification.EXCLUDED
+            analysis = Repository.create_analysis(
+                session=session,
+                news_event_id=event.id,
+                company_id=event.primary_company_id,
+                overall_score=round(final_score, 1),
+                classification=candidate_class,
+                news_impact_score=round(news_impact, 1),
+                materiality_score=round(mat_score, 1),
+                source_credibility_score=round(credibility_score, 1),
+                freshness_score=round(freshness_score, 1),
+                confirmation_score=round(confirmation_score, 1),
+                historical_reaction_score=round(historical_score, 1),
+                company_confidence_score=round(company_conf_score, 1),
+                penalties=penalties if penalties else None,
+                scoring_version=self.version,
+            )
+            logger.debug(
+                "Event #%d excluded by min-confidence gate (conf=%.1f, score=%.1f)",
+                event.id, classification.confidence, final_score,
+            )
+            return analysis
+
+        # 6. Determine Classification Priority (tighter thresholds for STRONG tiers)
         if is_negative:
-            if final_score >= 75.0:
+            if final_score >= 78.0:
                 candidate_class = CandidateClassification.STRONG_BEARISH
-            elif final_score >= 58.0:
+            elif final_score >= 60.0:
                 candidate_class = CandidateClassification.BEARISH
-            elif final_score >= 45.0:
+            elif final_score >= 46.0:
                 candidate_class = CandidateClassification.WATCH_ONLY
             else:
                 candidate_class = CandidateClassification.EXCLUDED
         elif "bullish" in direction or classification.sentiment in ("VERY_POSITIVE", "POSITIVE"):
-            if final_score >= 75.0:
+            if final_score >= 78.0:
                 candidate_class = CandidateClassification.STRONG_BULLISH
-            elif final_score >= 58.0:
+            elif final_score >= 60.0:
                 candidate_class = CandidateClassification.BULLISH
-            elif final_score >= 45.0:
+            elif final_score >= 46.0:
                 candidate_class = CandidateClassification.WATCH_ONLY
             else:
                 candidate_class = CandidateClassification.EXCLUDED
         else:
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 45.0 else CandidateClassification.EXCLUDED
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
 
         analysis = Repository.create_analysis(
             session=session,
