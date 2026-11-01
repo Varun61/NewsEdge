@@ -206,3 +206,35 @@ class TelegramFormatter:
             chunks.append("\n".join(current_chunk))
 
         return chunks
+
+    @classmethod
+    def format_startup_notification(
+        cls,
+        target_date: date,
+        start_time_ist: str,
+        window_desc: str,
+        is_adhoc: bool = True,
+        sources_count: int = 10,
+    ) -> str:
+        """Format an institutional startup notification sent prior to batch processing."""
+        mode_text = "On-Demand Ad-Hoc Scan" if is_adhoc else "Automated Weekday Morning Scan (07:00 AM IST)"
+        date_str = target_date.strftime("%d-%b-%Y (%A)")
+
+        lines = [
+            "⚡ <b>NEWSEDGE — PIPELINE INITIATED</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+            f"📅 <b>Date:</b> {date_str}",
+            f"⏰ <b>Start Time:</b> {start_time_ist}",
+            f"🎯 <b>Run Mode:</b> {mode_text}",
+            f"⏱ <b>Lookback Window:</b> {_esc(window_desc)}",
+            "",
+            "📊 <b>Execution Scope:</b>",
+            f"• <b>News Feeds:</b> {sources_count} Top Financial Sources (ET, Mint, Moneycontrol, Pulse, etc.)",
+            "• <b>Universe:</b> 2,359 Official NSE Listed Equities",
+            "• <b>Intelligence Engine:</b> Local Llama-3.2 + Thematic Screen + Empirical Reaction Calibration",
+            "",
+            "⏳ <i>Scanning news, analyzing material catalysts, and ranking candidates...</i>",
+            "<i>Top 10 Bullish & Bearish watchlists will follow upon completion!</i>",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+        ]
+        return "\n".join(lines)

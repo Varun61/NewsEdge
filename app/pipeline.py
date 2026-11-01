@@ -91,6 +91,23 @@ def run_pipeline(
         window_end.strftime("%Y-%m-%d %H:%M:%S UTC"),
     )
 
+    # Dispatch startup Telegram notification
+    try:
+        from app.reporting.telegram_bot import TelegramBot
+        bot = TelegramBot(settings)
+        start_time_str = now_ist().strftime("%I:%M:%S %p IST")
+        asyncio.run(
+            bot.send_startup_notification(
+                target_date=target_date,
+                start_time_ist=start_time_str,
+                window_desc=window_desc,
+                is_adhoc=is_adhoc,
+                sources_count=10,
+            )
+        )
+    except Exception as exc:
+        logger.warning("Could not dispatch startup Telegram notification: %s", exc)
+
     # Ensure master company universe is populated
     try:
         seed_database()
