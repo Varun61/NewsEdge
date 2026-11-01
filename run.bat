@@ -1,5 +1,7 @@
 @echo off
 title NewsEdge - Indian Stock Market Intelligence
+color 0B
+
 :: Ensure working directory is set to NewsEdge repository root
 if exist "%~dp0run_newsedge.py" (
     cd /d "%~dp0"
@@ -7,9 +9,11 @@ if exist "%~dp0run_newsedge.py" (
     cd /d "C:\Users\varun\NewsEdge"
 )
 
+cls
 echo =====================================================================
-echo Starting NewsEdge Automated Pipeline...
+echo   NEWSEDGE -- INDIAN INTRADAY STOCK MARKET INTELLIGENCE
 echo =====================================================================
+echo.
 
 if exist .venv\Scripts\python.exe (
     .venv\Scripts\python.exe run_newsedge.py %*
@@ -23,5 +27,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
+echo =====================================================================
 echo Press any key to close this window...
+echo =====================================================================
 pause >nul

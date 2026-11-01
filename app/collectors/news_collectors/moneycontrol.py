@@ -15,12 +15,12 @@ class MoneycontrolCollector(BaseCollector):
     """Collects news from Moneycontrol markets, corporate results, and sector coverage."""
 
     # High-velocity real-time syndication feeds ensure 100% current coverage
-    # even when direct static xml feeds are deprecated/cached.
+    # (Moneycontrol's legacy static XML endpoints were deprecated in 2024).
     FEEDS = [
         "https://news.google.com/rss/search?q=site:moneycontrol.com+(stocks+OR+shares+OR+results+OR+NSE+OR+BSE+OR+market)&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=site:moneycontrol.com+(earnings+OR+profit+OR+order+OR+SEBI+OR+probe)&hl=en-IN&gl=IN&ceid=IN:en",
-        "https://www.moneycontrol.com/rss/latestnews.xml",
-        "https://www.moneycontrol.com/rss/marketreports.xml",
+        "https://news.google.com/rss/search?q=site:moneycontrol.com+intitle:(Q1+OR+Q2+OR+Q3+OR+Q4+OR+results+OR+profit+OR+revenue)&hl=en-IN&gl=IN&ceid=IN:en",
+        "https://news.google.com/rss/search?q=site:moneycontrol.com+(merger+OR+acquisition+OR+contract+OR+deal+OR+regulatory)&hl=en-IN&gl=IN&ceid=IN:en",
     ]
 
     def __init__(

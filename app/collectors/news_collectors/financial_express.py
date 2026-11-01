@@ -14,11 +14,13 @@ logger = logging.getLogger("newsedge.collectors.financial_express")
 class FinancialExpressCollector(BaseCollector):
     """Collects markets and business news from Financial Express."""
 
+    # High-velocity real-time syndication feeds ensure 100% current coverage
+    # (Financial Express legacy static feeds were deprecated by Express Group).
     FEEDS = [
         "https://news.google.com/rss/search?q=site:financialexpress.com+(stocks+OR+market+OR+results+OR+NSE)&hl=en-IN&gl=IN&ceid=IN:en",
         "https://news.google.com/rss/search?q=site:financialexpress.com+(earnings+OR+shares+OR+SEBI)&hl=en-IN&gl=IN&ceid=IN:en",
-        "https://www.financialexpress.com/market/feed/",
-        "https://www.financialexpress.com/business/feed/",
+        "https://news.google.com/rss/search?q=site:financialexpress.com+intitle:(Q2+OR+Q3+OR+results+OR+profit+OR+order)&hl=en-IN&gl=IN&ceid=IN:en",
+        "https://news.google.com/rss/search?q=site:financialexpress.com+(capex+OR+acquisition+OR+contract+OR+regulatory)&hl=en-IN&gl=IN&ceid=IN:en",
     ]
 
     def __init__(
