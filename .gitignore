@@ -19,10 +19,9 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 
-# Logs and reports (generated)
+# Logs and reports (generated output — not committed)
 logs/*.log
-reports/*.html
-reports/*.xlsx
+reports/
 
 # IDE
 .vscode/

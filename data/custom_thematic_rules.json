@@ -1,0 +1,22 @@
+[
+  {
+    "theme_id": "DEFENCE_DRONES_TEST",
+    "theme_title": "Drone Surveillance Procurement",
+    "trigger_patterns": [
+      "\\b(?:drone|uav|anti-drone)\\b.*\\b(?:procurement|tender|army|defence)\\b"
+    ],
+    "bullish_beneficiaries": [
+      [
+        "IDEA_FORGE",
+        "Pure play drone manufacturer gaining from armed forces contracts.",
+        88.0
+      ],
+      [
+        "ZENTEC",
+        "Anti-drone countermeasure tech leader with expanding order book.",
+        87.0
+      ]
+    ],
+    "bearish_casualties": []
+  }
+]
