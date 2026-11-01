@@ -2,19 +2,26 @@
 
 Initializes schema and seeds:
 1. Default NewsSource records
-2. Comprehensive NSE stock universe (300+ actively traded companies)
-3. Aliases, abbreviations, and brand names
+2. Comprehensive NSE stock universe (300+ actively traded companies from NSE_MASTER_DATA)
+3. Full NSE equity universe from EQUITY_L.csv (2,600+ stocks)
+4. Aliases, abbreviations, and brand names
 """
 
 from __future__ import annotations
 
+import csv
 import logging
+from pathlib import Path
 
 from app.database.database import get_session, init_db
 from app.database.models import MarketCapCategory, SourceType
 from app.database.repository import Repository
 from app.logger import setup_logging
 from app.processors.nse_master import NSE_MASTER_DATA
+
+logger = logging.getLogger("newsedge.scripts.init_db")
+
+EQUITY_CSV_PATH = Path(__file__).resolve().parent.parent / "data" / "EQUITY_L.csv"
 
 logger = logging.getLogger("newsedge.scripts.init_db")
 
@@ -153,6 +160,37 @@ def seed_database():
 
         inserted = Repository.bulk_upsert_companies(session, companies_to_insert)
         logger.info("Upserted %d companies into database.", inserted)
+
+        # 2b. Bulk-import full NSE equity universe from EQUITY_L.csv
+        #     This ensures ALL 2,600+ listed equities are searchable even if not
+        #     in the hand-curated NSE_MASTER_DATA list.
+        if EQUITY_CSV_PATH.exists():
+            logger.info("Seeding full NSE equity universe from %s ...", EQUITY_CSV_PATH.name)
+            csv_companies = []
+            with EQUITY_CSV_PATH.open(newline="", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    sym = (row.get("SYMBOL") or "").strip().upper()
+                    name = (row.get("NAME OF COMPANY") or "").strip()
+                    series = (row.get(" SERIES") or row.get("SERIES") or "").strip()
+                    if not sym or not name:
+                        continue
+                    # Only include equity-series (skip BE, BT, etc. — non-standard series)
+                    if series and series not in ("EQ", ""):
+                        continue
+                    csv_companies.append({
+                        "nse_symbol": sym,
+                        "company_name": name,
+                        "sector": "Diversified",
+                        "industry": "Diversified",
+                        "annual_revenue": 5000.0,
+                        "market_cap_category": MarketCapCategory.SMALL_CAP,
+                        "is_active": True,
+                    })
+            csv_inserted = Repository.bulk_upsert_companies(session, csv_companies)
+            logger.info("Upserted %d equities from EQUITY_L.csv into database.", csv_inserted)
+        else:
+            logger.warning("EQUITY_L.csv not found at %s — skipping full universe seed.", EQUITY_CSV_PATH)
 
         # 3. Aliases
         logger.info("Seeding Company Aliases...")
