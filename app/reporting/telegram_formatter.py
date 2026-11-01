@@ -165,12 +165,13 @@ class TelegramFormatter:
             if ev.article_links:
                 for link in ev.article_links:
                     art = getattr(link, "article", None)
-                    if art and art.article_url:
+                    if art and getattr(art, "article_url", None):
                         url = art.article_url
-                        if art.source_name:
+                        src = getattr(art, "source", None)
+                        if src and getattr(src, "name", None):
+                            source_label = src.name
+                        elif getattr(art, "source_name", None):
                             source_label = art.source_name
-                        elif getattr(art, "source", None) and art.source.name:
-                            source_label = art.source.name
                         break
 
             # Deduplicate by event
