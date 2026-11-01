@@ -123,16 +123,15 @@ class NewsClassifier:
             comp_name = primary_thematic.company_name
             logger.info("Event #%d mapped to sector beneficiary/casualty: %s (%s) [%s]", event.id, comp_name, symbol, primary_thematic.theme_title)
 
-        # Filter out macro noise or unmapped general news early
-        from app.processors.deduplicator import is_macro_noise
+        # Discard unmapped non-equity events early
+        # If no listed NSE equity could be resolved and no sector thematic matched, skip AI call
         if symbol == "UNKNOWN" and not event.primary_company_id and not thematic_matches:
-            if is_macro_noise(event.primary_headline) or not _has_catalyst_signals(event.primary_headline, combined_text):
-                logger.debug("Skipping unmapped general event #%d: %s", event.id, event.primary_headline[:50])
-                event.is_processed = True
-                return None
+            logger.debug("Skipping unmapped non-equity event #%d: %s", event.id, event.primary_headline[:60])
+            event.is_processed = True
+            return None
 
         is_catalyst = _has_catalyst_signals(event.primary_headline, combined_text) or bool(thematic_matches)
-        
+
         # High confidence heuristic pattern for known stocks
         clear_heuristic_trigger = (symbol != "UNKNOWN") and (bool(thematic_matches) or any(
             re.search(pat, event.primary_headline.lower())
@@ -142,7 +141,7 @@ class NewsClassifier:
             ]
         ))
 
-        use_ai = (not clear_heuristic_trigger and is_catalyst) or (symbol == "UNKNOWN" and is_catalyst)
+        use_ai = not clear_heuristic_trigger and is_catalyst
 
         if thematic_matches:
             primary_thematic = thematic_matches[0]

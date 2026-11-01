@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from typing import Optional
 
 import requests
@@ -13,6 +14,49 @@ from app.config import Settings
 from app.intelligence.ai_provider import BaseAIProvider, ClassificationResult, SYSTEM_PROMPT
 
 logger = logging.getLogger("newsedge.intelligence.ollama")
+
+# Global lock to serialize inference calls to local Ollama daemon
+# Prevents multiple concurrent threads from causing socket read timeouts
+_OLLAMA_INFERENCE_LOCK = threading.Lock()
+
+
+def _safe_float(val, default: float = 50.0) -> float:
+    """Safely convert strings, None, or percentages to float without ValueError."""
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        # Extract first numeric sequence like '85' from '85%' or '85.5'
+        match = re.search(r"[-+]?\d*\.?\d+", val)
+        if match:
+            try:
+                return float(match.group(0))
+            except Exception:
+                pass
+    return default
+
+
+def _extract_fields_via_regex(text: str) -> dict:
+    """Fallback extractor if Ollama's returned JSON was truncated or had syntax issues."""
+    data = {}
+    patterns = {
+        "company_name": r'"company_name"\s*:\s*"([^"]+)"',
+        "nse_symbol": r'"nse_symbol"\s*:\s*"([^"]+)"',
+        "news_category": r'"news_category"\s*:\s*"([^"]+)"',
+        "sentiment": r'"sentiment"\s*:\s*"([^"]+)"',
+        "impact_score": r'"impact_score"\s*:\s*([0-9.]+)',
+        "confidence": r'"confidence"\s*:\s*([0-9.]+)',
+        "expected_direction": r'"expected_direction"\s*:\s*"([^"]+)"',
+        "financial_materiality": r'"financial_materiality"\s*:\s*"([^"]+)"',
+        "news_summary": r'"news_summary"\s*:\s*"([^"]+)"',
+        "reasoning": r'"reasoning"\s*:\s*"([^"]+)"',
+    }
+    for key, pat in patterns.items():
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            data[key] = m.group(1).strip()
+    return data
 
 
 class OllamaProvider(BaseAIProvider):
@@ -66,14 +110,16 @@ Summary: {content[:350]}
             "format": "json",
             "options": {
                 "temperature": 0.1,
-                "num_predict": 250,  # Fast, complete JSON generation
+                "num_predict": 450,  # Generous token budget to avoid truncated JSON
             },
         }
 
         try:
-            resp = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=45)
-            resp.raise_for_status()
-            raw_response = resp.json().get("response", "{}")
+            # Serialize inference through the global lock to prevent queue timeouts
+            with _OLLAMA_INFERENCE_LOCK:
+                resp = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=90)
+                resp.raise_for_status()
+                raw_response = resp.json().get("response", "{}")
 
             # Extract JSON
             match = re.search(r"\{.*\}", raw_response, re.DOTALL)
@@ -88,7 +134,12 @@ Summary: {content[:350]}
                     if not json_str.endswith("}"):
                         json_str += "}"
 
-            data = json.loads(json_str)
+            data = {}
+            try:
+                data = json.loads(json_str)
+            except Exception as j_err:
+                logger.debug("Ollama JSON parse warning (%s). Applying regex field rescue.", j_err)
+                data = _extract_fields_via_regex(raw_response)
 
             from app.processors.nse_master import get_nse_resolver
             resolver = get_nse_resolver()
@@ -117,14 +168,14 @@ Summary: {content[:350]}
                 nse_symbol=returned_sym,
                 news_category=data.get("news_category", "OTHER"),
                 sentiment=data.get("sentiment", "NEUTRAL"),
-                impact_score=float(data.get("impact_score", 50.0)),
-                confidence=float(data.get("confidence", 60.0)),
-                financial_materiality=data.get("financial_materiality", ""),
-                expected_direction=data.get("expected_direction", "neutral").lower(),
-                time_horizon=data.get("time_horizon", "intraday"),
-                news_summary=data.get("news_summary", headline),
-                reasoning=data.get("reasoning", ""),
-                risks=data.get("risks", []),
+                impact_score=_safe_float(data.get("impact_score"), 50.0),
+                confidence=_safe_float(data.get("confidence"), 60.0),
+                financial_materiality=str(data.get("financial_materiality", "")),
+                expected_direction=str(data.get("expected_direction", "neutral")).lower(),
+                time_horizon=str(data.get("time_horizon", "intraday")),
+                news_summary=str(data.get("news_summary", headline)),
+                reasoning=str(data.get("reasoning", "")),
+                risks=data.get("risks", []) if isinstance(data.get("risks"), list) else [],
                 source_urls=source_urls,
             )
         except Exception as exc:
