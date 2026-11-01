@@ -1,6 +1,11 @@
 @echo off
 title NewsEdge - Indian Stock Market Intelligence
-cd /d "%~dp0"
+:: Ensure working directory is set to NewsEdge repository root
+if exist "%~dp0run_newsedge.py" (
+    cd /d "%~dp0"
+) else (
+    cd /d "C:\Users\varun\NewsEdge"
+)
 
 echo =====================================================================
 echo Starting NewsEdge Automated Pipeline...
