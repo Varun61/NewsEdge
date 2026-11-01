@@ -192,24 +192,58 @@ def seed_database():
         else:
             logger.warning("EQUITY_L.csv not found at %s — skipping full universe seed.", EQUITY_CSV_PATH)
 
-        # 3. Aliases
+        # 3. Aliases from curated data + full NSEStockResolver universe
         logger.info("Seeding Company Aliases...")
+        from sqlalchemy import select
+        from app.database.models import Company, CompanyAlias
+        from app.processors.nse_master import get_nse_resolver
+
+        existing_aliases = set(session.scalars(select(CompanyAlias.alias_name)).all())
+        existing_alias_lower = {a.lower() for a in existing_aliases}
+        symbol_to_id = {c.nse_symbol.upper(): c.id for c in session.scalars(select(Company)).all()}
+
+        aliases_to_add: list[CompanyAlias] = []
+
+        # 3a. Curated aliases (0.95 confidence)
         for item in NSE_MASTER_DATA:
             sym = item["symbol"].upper()
-            comp = Repository.get_company_by_symbol(session, sym)
-            if not comp:
+            cid = symbol_to_id.get(sym)
+            if not cid:
                 continue
 
             for alias in item.get("aliases", []):
-                existing = Repository.find_company_by_alias(session, alias)
-                if not existing:
-                    Repository.create_alias(
-                        session=session,
-                        company_id=comp.id,
-                        alias_name=alias,
-                        alias_type="common_name",
-                        confidence=0.95,
+                if alias.lower() not in existing_alias_lower:
+                    aliases_to_add.append(
+                        CompanyAlias(
+                            company_id=cid,
+                            alias_name=alias,
+                            alias_type="curated_brand",
+                            confidence=0.95,
+                        )
                     )
+                    existing_alias_lower.add(alias.lower())
+
+        # 3b. Auto-generated brand & company name phrases from NSEStockResolver
+        resolver = get_nse_resolver()
+        for phrase, sym in resolver._alias_map.items():
+            sym_clean = sym.upper()
+            cid = symbol_to_id.get(sym_clean)
+            if cid and phrase.lower() not in existing_alias_lower and len(phrase) >= 3:
+                aliases_to_add.append(
+                    CompanyAlias(
+                        company_id=cid,
+                        alias_name=phrase,
+                        alias_type="brand_phrase",
+                        confidence=0.90,
+                    )
+                )
+                existing_alias_lower.add(phrase.lower())
+
+        if aliases_to_add:
+            session.bulk_save_objects(aliases_to_add)
+            logger.info("Added %d new company aliases to database.", len(aliases_to_add))
+        else:
+            logger.info("All company aliases are already up to date.")
 
         session.commit()
 
