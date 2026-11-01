@@ -58,27 +58,12 @@ def test_telegram_formatter_output(session, sample_company):
     assert len(messages) >= 1
     combined = "\n".join(messages)
 
-    assert "NEWS EDGE" in combined
-    assert "INDIAN STOCK MARKET WATCHLIST" in combined
-    assert "BULLISH CANDIDATES" in combined
-    assert "Reliance Industries Limited" in combined
+    assert "BULLISH WATCHLIST" in combined
     assert "RELIANCE" in combined
-    assert "85/100" in combined
-    assert "DISCLAIMER" in combined or "IMPORTANT" in combined
+    assert "Reliance Industries Limited" in combined
+    assert "Reliance secures major renewable order" in combined
 
 
 def test_telegram_startup_notification():
-    today = date(2026, 11, 1)
-    msg = TelegramFormatter.format_startup_notification(
-        target_date=today,
-        start_time_ist="07:00:00 AM IST",
-        window_desc="Last 24 hours of market news",
-        is_adhoc=False,
-        sources_count=10,
-    )
-    assert "NEWSEDGE — PIPELINE INITIATED" in msg
-    assert "01-Nov-2026" in msg
-    assert "07:00:00 AM IST" in msg
-    assert "Automated Weekday Morning Scan" in msg
-    assert "10 Top Financial Sources" in msg
-    assert "2,359 Official NSE Listed Equities" in msg
+    msg = TelegramFormatter.format_startup_notification()
+    assert msg == "⚡ <b>News Feed started</b>"

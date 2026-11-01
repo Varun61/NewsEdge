@@ -1,16 +1,17 @@
-"""Telegram message formatter matching the NewsEdge PRD format.
+"""Telegram message formatter matching modern, minimalist fintech standards.
 
-Produces clean, highly readable messages for intraday stock traders:
-- Prominently displays Company Name and NSE Ticker symbol.
-- Delivers Top 10 Strongest Bullish stocks in one clean message.
-- Delivers Top 10 Strongest Bearish stocks in a second clean message.
-- Eliminates repetitive clutter and verbosity for fast scanning.
+Produces clean, aesthetic, and scannable messages for stock traders:
+- Monospace tap-to-copy NSE ticker (`<code>SYMBOL</code>`)
+- Bold clear company name
+- One concise line of news catalyst
+- Minimal visual noise and no verbose clutter
 """
 
 from __future__ import annotations
 
 import html
 import logging
+from datetime import date
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ from app.database.models import (
     DailyWatchlist,
     StockAnalysis,
 )
+from app.processors.nse_master import clean_headline_publisher
 
 logger = logging.getLogger("newsedge.reporting.formatter")
 
@@ -29,8 +31,28 @@ def _esc(text: str) -> str:
     return html.escape(text or "")
 
 
+def _format_concise_headline(headline: str, max_chars: int = 75) -> str:
+    """Strip news prefixes, publishers, and cleanly truncate to a single crisp line."""
+    clean = clean_headline_publisher(headline or "")
+
+    # Strip common wire prefixes
+    for prefix in (
+        "Earnings call transcript:", "Transcript:", "Live:", "Alert:",
+        "Watch:", "Stock in focus:", "Stocks in focus:", "Stocks to watch:",
+        "Buzzing stock:", "Buzzing stocks:", "Q2 results:", "Q3 results:",
+        "Q4 results:", "Q1 results:", "Exclusive:",
+    ):
+        if clean.lower().startswith(prefix.lower()):
+            clean = clean[len(prefix):].strip()
+
+    clean = " ".join(clean.split())  # normalize extra spaces
+    if len(clean) > max_chars:
+        clean = clean[:max_chars].rsplit(" ", 1)[0] + "…"
+    return clean
+
+
 class TelegramFormatter:
-    """Formats DailyWatchlists into clean, highly scannable Telegram messages (HTML)."""
+    """Formats DailyWatchlists into modern, clean, scannable Telegram messages (HTML)."""
 
     MAX_MESSAGE_LENGTH = 3900
 
@@ -42,8 +64,7 @@ class TelegramFormatter:
         window_description: Optional[str] = None,
     ) -> List[str]:
         """Convert a DailyWatchlist into focused Bullish and Bearish messages."""
-        ist_date = watchlist.report_date.strftime("%A, %d-%m-%Y")
-        collection_meta = window_description or "Previous trading session close to cutoff"
+        date_str = watchlist.report_date.strftime("%d %b")
 
         items = sorted(watchlist.items, key=lambda it: it.rank_position)
         analyses: list[StockAnalysis] = [it.stock_analysis for it in items if it.stock_analysis]
@@ -79,67 +100,35 @@ class TelegramFormatter:
 
         # ── Message 1: Top Bullish Candidates ──────────────────────────
         lines_bullish = [
-            "📊 <b>NEWS EDGE — INDIAN STOCK MARKET WATCHLIST</b>",
-            f"📅 <b>Date:</b> {_esc(ist_date)} | ⏰ {_esc(collection_meta)}",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"🟢 <b>TOP {len(top_bullish)} STRONGEST BULLISH CANDIDATES</b>",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"🟢 <b>BULLISH WATCHLIST</b> • {date_str}",
             "",
         ]
 
         if not top_bullish:
-            lines_bullish.append("<i>No high-probability bullish catalyst identified for this session.</i>")
-            lines_bullish.append("")
+            lines_bullish.append("<i>No high-conviction bullish catalysts found today.</i>")
         else:
             for idx, item in enumerate(top_bullish, 1):
                 lines_bullish.extend(cls._format_candidate_card(item, idx, is_bullish=True))
 
-        lines_bullish.append("━━━━━━━━━━━━━━━━━━━━━━━━━")
-        bullish_text = "\n".join(lines_bullish)
+        bullish_text = "\n".join(lines_bullish).strip()
         for chunk in cls._chunk_text(bullish_text):
             messages.append(chunk)
 
         # ── Message 2: Top Bearish Candidates ──────────────────────────
         lines_bearish = [
-            "📊 <b>NEWS EDGE — INDIAN STOCK MARKET WATCHLIST</b>",
-            f"📅 <b>Date:</b> {_esc(ist_date)} | ⏰ {_esc(collection_meta)}",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"🔴 <b>TOP {len(top_bearish)} STRONGEST BEARISH CANDIDATES</b>",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"🔴 <b>BEARISH WATCHLIST</b> • {date_str}",
             "",
         ]
 
         if not top_bearish:
-            lines_bearish.append("<i>No high-probability bearish catalyst identified for this session.</i>")
-            lines_bearish.append("")
+            lines_bearish.append("<i>No high-conviction bearish catalysts found today.</i>")
         else:
             for idx, item in enumerate(top_bearish, 1):
                 lines_bearish.extend(cls._format_candidate_card(item, idx, is_bullish=False))
 
-        lines_bearish.append("━━━━━━━━━━━━━━━━━━━━━━━━━")
-        bearish_text = "\n".join(lines_bearish)
+        bearish_text = "\n".join(lines_bearish).strip()
         for chunk in cls._chunk_text(bearish_text):
             messages.append(chunk)
-
-        # ── Message 3: Market Summary & Sources ────────────────────────
-        strong_b_count = len([a for a in bullish if a.classification == CandidateClassification.STRONG_BULLISH])
-        b_count = len([a for a in bullish if a.classification == CandidateClassification.BULLISH])
-        strong_bear_count = len([a for a in bearish if a.classification == CandidateClassification.STRONG_BEARISH])
-        bear_count = len([a for a in bearish if a.classification == CandidateClassification.BEARISH])
-
-        summary_lines = [
-            "📋 <b>MARKET PREPARATION SUMMARY</b>",
-            f"• Bullish Candidates: <b>{len(bullish)}</b> ({strong_b_count} Strong, {b_count} Moderate)",
-            f"• Bearish Candidates: <b>{len(bearish)}</b> ({strong_bear_count} Strong, {bear_count} Moderate)",
-            f"• Total News Events Analyzed: <b>{watchlist.total_events}</b>",
-            f"• Active Sources Checked: <b>{watchlist.successful_sources}/{watchlist.total_sources_checked}</b>",
-            "📡 <i>Sources: Google News, ET, Business Standard, Mint, Hindu BusinessLine, Moneycontrol, Financial Express, CNBC-TV18</i>",
-            "",
-            "⚠️ <b>IMPORTANT:</b>",
-            "<i>These research candidates are generated via automated news intelligence.</i>",
-            "<i>Actual trades must depend on 9:15 AM opening price action, market breadth, and risk management.</i>",
-        ]
-        messages.append("\n".join(summary_lines))
 
         return messages
 
@@ -151,32 +140,13 @@ class TelegramFormatter:
         event = analysis.news_event
         comp_name = company.company_name if company else "Company"
         symbol = company.nse_symbol if company else "UNKNOWN"
-        score = int(analysis.overall_score)
-        conviction = "STRONG" if "strong" in analysis.classification.value else "MODERATE"
         headline = event.primary_headline if event else "Announcement"
-        raw_materiality = (event.financial_materiality or "").strip() if event else ""
-        icon = "📈" if is_bullish else "📉"
 
-        # Ensure rationale explanation is rich and not a one-word placeholder (e.g. "High", "Price")
-        reason = raw_materiality
-        if not reason or len(reason) < 10 or reason.lower() in ("high", "low", "medium", "price", "yes", "no", "n/a"):
-            if event and event.reasoning and len(event.reasoning) >= 15:
-                reason = event.reasoning
-            elif event and event.news_summary and len(event.news_summary) >= 15:
-                reason = event.news_summary
-            else:
-                cat_name = event.news_category.value.replace("_", " ").title() if (event and event.news_category) else "Market Catalyst"
-                reason = f"{cat_name} driving institutional intraday repricing"
-
-        # Strip publisher suffix from headline if still present
-        from app.processors.nse_master import clean_headline_publisher
-        clean_hl = clean_headline_publisher(headline)
+        concise_news = _format_concise_headline(headline, max_chars=75)
 
         card = [
-            f"<b>{rank}. {_esc(comp_name)}</b>",
-            f"   NSE: <code>{_esc(symbol)}</code> | ⚡ Score: <b>{score}/100</b> ({conviction})",
-            f"   📰 {_esc(clean_hl[:110])}",
-            f"   {icon} <i>{_esc(reason[:120])}</i>",
+            f"{rank}. <code>{_esc(symbol)}</code> • <b>{_esc(comp_name)}</b>",
+            f"   {_esc(concise_news)}",
             "",
         ]
         return card
@@ -208,33 +178,6 @@ class TelegramFormatter:
         return chunks
 
     @classmethod
-    def format_startup_notification(
-        cls,
-        target_date: date,
-        start_time_ist: str,
-        window_desc: str,
-        is_adhoc: bool = True,
-        sources_count: int = 10,
-    ) -> str:
-        """Format an institutional startup notification sent prior to batch processing."""
-        mode_text = "On-Demand Ad-Hoc Scan" if is_adhoc else "Automated Weekday Morning Scan (07:00 AM IST)"
-        date_str = target_date.strftime("%d-%b-%Y (%A)")
-
-        lines = [
-            "⚡ <b>NEWSEDGE — PIPELINE INITIATED</b>",
-            "━━━━━━━━━━━━━━━━━━━━━━",
-            f"📅 <b>Date:</b> {date_str}",
-            f"⏰ <b>Start Time:</b> {start_time_ist}",
-            f"🎯 <b>Run Mode:</b> {mode_text}",
-            f"⏱ <b>Lookback Window:</b> {_esc(window_desc)}",
-            "",
-            "📊 <b>Execution Scope:</b>",
-            f"• <b>News Feeds:</b> {sources_count} Top Financial Sources (ET, Mint, Moneycontrol, Pulse, etc.)",
-            "• <b>Universe:</b> 2,359 Official NSE Listed Equities",
-            "• <b>Intelligence Engine:</b> Local Llama-3.2 + Thematic Screen + Empirical Reaction Calibration",
-            "",
-            "⏳ <i>Scanning news, analyzing material catalysts, and ranking candidates...</i>",
-            "<i>Top 10 Bullish & Bearish watchlists will follow upon completion!</i>",
-            "━━━━━━━━━━━━━━━━━━━━━━",
-        ]
-        return "\n".join(lines)
+    def format_startup_notification(cls, *args, **kwargs) -> str:
+        """Minimal, modern startup alert."""
+        return "⚡ <b>News Feed started</b>"

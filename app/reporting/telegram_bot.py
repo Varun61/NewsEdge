@@ -59,28 +59,15 @@ class TelegramBot:
             logger.error("Failed to send Telegram report: %s", exc)
             return False
 
-    async def send_startup_notification(
-        self,
-        target_date,
-        start_time_ist: str,
-        window_desc: str,
-        is_adhoc: bool = True,
-        sources_count: int = 10,
-    ) -> bool:
-        """Send formatted pipeline startup alert to the configured TELEGRAM_CHAT_ID."""
+    async def send_startup_notification(self, *args, **kwargs) -> bool:
+        """Send minimal startup alert to the configured TELEGRAM_CHAT_ID."""
         if not self.token or not self.chat_id:
             logger.warning("Telegram bot credentials not configured. Skipping startup alert.")
             return False
 
         try:
             bot = Bot(token=self.token)
-            msg = TelegramFormatter.format_startup_notification(
-                target_date=target_date,
-                start_time_ist=start_time_ist,
-                window_desc=window_desc,
-                is_adhoc=is_adhoc,
-                sources_count=sources_count,
-            )
+            msg = TelegramFormatter.format_startup_notification()
             await bot.send_message(
                 chat_id=self.chat_id,
                 text=msg,
