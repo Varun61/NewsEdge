@@ -126,11 +126,85 @@ class TelegramFormatter:
             for idx, item in enumerate(top_bearish, 1):
                 lines_bearish.extend(cls._format_candidate_card(item, idx, is_bullish=False))
 
+        # ── Optional: Major Sector Catalysts & News Highlights ─────────
+        major_section = cls._format_major_catalysts(analyses)
+        if major_section:
+            lines_bearish.extend(major_section)
+
         bearish_text = "\n".join(lines_bearish).strip()
         for chunk in cls._chunk_text(bearish_text):
             messages.append(chunk)
 
         return messages
+
+    @classmethod
+    def _format_major_catalysts(cls, analyses: List[StockAnalysis]) -> List[str]:
+        """Extract and format distinct major sector/policy news events with direct news links."""
+        seen_events = set()
+        cards = []
+
+        for a in analyses:
+            ev = a.news_event
+            if not ev or ev.id in seen_events:
+                continue
+
+            mat = (ev.financial_materiality or "").strip()
+            is_thematic = mat.startswith("[") and "]" in mat
+            is_major = (
+                a.overall_score >= 82.0
+                or (ev.impact_score and ev.impact_score >= 82.0)
+                or is_thematic
+            )
+
+            if not is_major:
+                continue
+
+            # Find direct article URL and publisher name
+            url = None
+            source_label = "News Source"
+            if ev.article_links:
+                for link in ev.article_links:
+                    art = getattr(link, "article", None)
+                    if art and art.article_url:
+                        url = art.article_url
+                        if art.source_name:
+                            source_label = art.source_name
+                        elif getattr(art, "source", None) and art.source.name:
+                            source_label = art.source.name
+                        break
+
+            # Deduplicate by event
+            seen_events.add(ev.id)
+
+            if is_thematic:
+                theme_title = mat.split("]")[0].replace("[", "").strip()
+            else:
+                comp = a.company
+                theme_title = comp.company_name if comp else "Corporate Catalyst"
+
+            highlight = _format_concise_headline(ev.primary_headline, max_chars=85)
+
+            card_lines = [
+                f"• <b>{_esc(theme_title)}</b>",
+                f"  {_esc(highlight)}",
+            ]
+            if url:
+                card_lines.append(f'  🔗 <a href="{_esc(url)}">Read on {_esc(source_label)}</a>')
+            card_lines.append("")
+
+            cards.extend(card_lines)
+            if len(seen_events) >= 3:  # Limit to Top 3 major developments
+                break
+
+        if not cards:
+            return []
+
+        return [
+            "",
+            "🌐 <b>KEY SECTOR DEVELOPMENTS</b>",
+            "",
+            *cards,
+        ]
 
     @classmethod
     def _format_candidate_card(

@@ -355,7 +355,76 @@ class ThematicEngine:
     """Detects sector-wide catalysts and maps impact across Large, Mid, Small, and Micro-cap stocks."""
 
     def __init__(self):
-        self.rules = SECTOR_THEMATIC_RULES
+        self.rules: List[SectorRule] = list(SECTOR_THEMATIC_RULES)
+        self._load_custom_rules()
+
+    def _load_custom_rules(self) -> None:
+        """Load user-defined learning rules from data/custom_thematic_rules.json."""
+        from pathlib import Path
+        import json
+
+        custom_file = Path(__file__).resolve().parent.parent.parent / "data" / "custom_thematic_rules.json"
+        if custom_file.exists():
+            try:
+                with open(custom_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for r in data:
+                        self.rules.append(
+                            SectorRule(
+                                theme_id=r["theme_id"],
+                                theme_title=r["theme_title"],
+                                trigger_patterns=r["trigger_patterns"],
+                                bullish_beneficiaries=[tuple(b) for b in r.get("bullish_beneficiaries", [])],
+                                bearish_casualties=[tuple(c) for c in r.get("bearish_casualties", [])],
+                            )
+                        )
+                logger.info("Loaded %d custom learned thematic rule(s) from %s", len(data), custom_file.name)
+            except Exception as exc:
+                logger.warning("Failed to load custom thematic rules: %s", exc)
+
+    def learn_rule(
+        self,
+        theme_title: str,
+        trigger_patterns: List[str],
+        bullish_beneficiaries: List[Tuple[str, str, float]],
+        bearish_casualties: List[Tuple[str, str, float]],
+        theme_id: Optional[str] = None,
+    ) -> bool:
+        """Persist a new learned rule from user feedback into data/custom_thematic_rules.json."""
+        from pathlib import Path
+        import json
+
+        custom_file = Path(__file__).resolve().parent.parent.parent / "data" / "custom_thematic_rules.json"
+
+        tid = theme_id or theme_title.upper().replace(" ", "_")[:30]
+        new_rule_dict = {
+            "theme_id": tid,
+            "theme_title": theme_title,
+            "trigger_patterns": trigger_patterns,
+            "bullish_beneficiaries": [list(b) for b in bullish_beneficiaries],
+            "bearish_casualties": [list(c) for c in bearish_casualties],
+        }
+
+        existing_data = []
+        if custom_file.exists():
+            try:
+                with open(custom_file, "r", encoding="utf-8") as f:
+                    existing_data = json.load(f)
+            except Exception:
+                existing_data = []
+
+        existing_data = [r for r in existing_data if r.get("theme_id") != tid]
+        existing_data.append(new_rule_dict)
+
+        custom_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(custom_file, "w", encoding="utf-8") as f:
+            json.dump(existing_data, f, indent=2)
+
+        # Refresh in-memory rules
+        self.rules = list(SECTOR_THEMATIC_RULES)
+        self._load_custom_rules()
+        logger.info("Successfully learned and persisted thematic rule '%s' (%s)", theme_title, tid)
+        return True
 
     def detect_sector_catalysts(self, headline: str, text: str = "") -> List[ThematicImpact]:
         """Evaluate article text against all sector thematic rules.

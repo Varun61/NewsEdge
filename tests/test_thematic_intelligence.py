@@ -114,3 +114,23 @@ def test_historical_reaction_profiles():
     assert profile_rail is not None
     assert profile_rail.expected_direction == "bullish"
     assert profile_rail.historical_score >= 80.0
+
+
+def test_thematic_custom_rule_learning(tmp_path):
+    engine = get_thematic_engine()
+    success = engine.learn_rule(
+        theme_title="Drone Surveillance Procurement",
+        trigger_patterns=[r"\b(?:drone|uav|anti-drone)\b.*\b(?:procurement|tender|army|defence)\b"],
+        bullish_beneficiaries=[
+            ("IDEA_FORGE", "Pure play drone manufacturer gaining from armed forces contracts.", 88.0),
+            ("ZENTEC", "Anti-drone countermeasure tech leader with expanding order book.", 87.0),
+        ],
+        bearish_casualties=[],
+        theme_id="DEFENCE_DRONES_TEST",
+    )
+    assert success is True
+
+    # Test detection on a headline without any company name mentioned
+    impacts = engine.detect_sector_catalysts("Indian Army issues mega tender for high-altitude surveillance drone procurement")
+    symbols = [imp.symbol for imp in impacts]
+    assert "IDEA_FORGE" in symbols or "ZENTEC" in symbols
