@@ -219,9 +219,20 @@ class TelegramFormatter:
 
         concise_news = _format_concise_headline(headline, max_chars=75)
 
+        # Extract direct article link to original news source
+        url = None
+        if event and event.article_links:
+            for link in event.article_links:
+                art = getattr(link, "article", None)
+                if art and getattr(art, "article_url", None):
+                    url = art.article_url
+                    break
+
+        link_html = f' • <a href="{_esc(url)}">LINK</a>' if url else ""
+
         card = [
             f"{rank}. <code>{_esc(symbol)}</code> • <b>{_esc(comp_name)}</b>",
-            f"   {_esc(concise_news)}",
+            f"   {_esc(concise_news)}{link_html}",
             "",
         ]
         return card
