@@ -53,11 +53,12 @@ class Deduplicator:
         cleaned = re.sub(r"[^\w\s]", " ", title.lower())
         return re.sub(r"\s+", " ", cleaned).strip()
 
-    def _are_headlines_similar(self, h1: str, h2: str) -> bool:
+    def _are_headlines_similar(self, h1: str, h2: str, threshold: float | None = None) -> bool:
         t1 = self._clean_title(h1)
         t2 = self._clean_title(h2)
         ratio = difflib.SequenceMatcher(None, t1, t2).ratio()
-        return ratio >= self.headline_similarity_threshold
+        limit = threshold if threshold is not None else self.headline_similarity_threshold
+        return ratio >= limit
 
     def deduplicate_articles(
         self,
@@ -123,7 +124,18 @@ class Deduplicator:
                 within_time = abs((time_a - time_b).total_seconds()) <= self.max_time_delta.total_seconds()
                 similar_headline = self._are_headlines_similar(art_a.headline, art_b.headline)
 
-                if (same_company and within_time and similar_headline) or (similar_headline and within_time):
+                # Same company topic matching (e.g. Q2/earnings, order/deal, probe/penalty)
+                topic_match = False
+                if same_company and within_time:
+                    cats_a = set(re.findall(r"\b(q[1-4]|results?|profits?|loss(?:es)?|revenues?|orders?|contracts?|dividends?|buybacks?|acquisitions?|mergers?|stakes?|probes?|sebi|raids?|resigns?|appoint(?:ed|ment)?)\b", art_a.headline.lower()))
+                    cats_b = set(re.findall(r"\b(q[1-4]|results?|profits?|loss(?:es)?|revenues?|orders?|contracts?|dividends?|buybacks?|acquisitions?|mergers?|stakes?|probes?|sebi|raids?|resigns?|appoint(?:ed|ment)?)\b", art_b.headline.lower()))
+                    if cats_a and cats_b and (cats_a & cats_b):
+                        topic_match = True
+
+                if within_time and (
+                    similar_headline
+                    or (same_company and (topic_match or self._are_headlines_similar(art_a.headline, art_b.headline, threshold=0.40)))
+                ):
                     current_group.append(art_b)
                     visited_ids.add(art_b.id)
 

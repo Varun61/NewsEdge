@@ -43,15 +43,13 @@ _LLM_LOCK = threading.Lock()
 
 CATALYST_PATTERNS = [
     r"\b(order|contract|bags|wins|secures|awarded|l1 bidder|pact)\b",
-    r"\b(profit|revenue|results|q[1-4]|ebitda|margin|loss|sales|quarterly)\b",
+    r"\b(profit|revenue|results|q[1-4]|ebitda|margin|loss|quarterly|earnings)\b",
     r"\b(acquisition|acquires|merger|stake|buyout|jv|joint venture|demerger)\b",
     r"\b(dividend|buyback|bonus|split|rights issue|qip|fund raise|debt|prepayment)\b",
     r"\b(sebi|usfda|fda|warning letter|form 483|eir|penalty|raid|fraud|probe|nclt|cbi)\b",
     r"\b(plant|facility|capacity|expansion|commission|launch|inaugurate)\b",
     r"\b(upgrade|downgrade|target price|rating)\b",
     r"\b(resigns|appointed|resignation|steps down|ceo|cfo|md)\b",
-    r"\b(share|stock|rally|surge|slump|plunge|crash|jumps|tumbles)\b",
-    r"[₹]|rs\.?|\bcrore\b|\bcr\b|\blakh\b",
 ]
 
 
@@ -132,14 +130,23 @@ class NewsClassifier:
 
         is_catalyst = _has_catalyst_signals(event.primary_headline, combined_text) or bool(thematic_matches)
 
-        # High confidence heuristic pattern for known stocks
-        clear_heuristic_trigger = (symbol != "UNKNOWN") and (bool(thematic_matches) or any(
-            re.search(pat, event.primary_headline.lower())
-            for pat in [
-                r"\b(profit\s+(?:jumps|surges|doubles|rises|up)|order\s+win|bags\s+(?:contract|order|deal)|secures\s+order)\b",
-                r"\b(sebi\s+(?:penalty|ban|fine)|usfda\s+warning|profit\s+(?:falls|slumps|drops))\b",
-            ]
-        ))
+        # Smart quantitative fast-path routing:
+        # If the news has quantifiable metrics (Rs crore, % profit surge/fall), routine corporate filings,
+        # or clear regulatory actions, the deterministic catalyst engine evaluates it in 0.001s with exact math.
+        h_lower = event.primary_headline.lower()
+        has_clear_numbers = bool(
+            re.search(r"(\d+(?:\.\d+)?)\s*%", event.primary_headline)
+            or re.search(r"(?:(?:rs\.?|inr|₹)\s*)?([\d,]+(?:\.\d+)?)\s*(?:crore|cr)\b", event.primary_headline, re.I)
+        )
+        is_routine_filing = any(w in h_lower for w in ["agm", "annual general meeting", "board meeting", "board meets", "analyst meet", "investor presentation"])
+        is_clear_regulatory = any(w in h_lower for w in ["sebi penalty", "sebi fine", "sebi ban", "usfda warning", "import alert", "cbi probe", "ed raid", "auditor resign"])
+
+        clear_heuristic_trigger = (symbol != "UNKNOWN") and (
+            bool(thematic_matches)
+            or is_routine_filing
+            or (has_clear_numbers and any(w in h_lower for w in ["order", "contract", "bags", "wins", "profit", "net", "loss", "revenue", "sales"]))
+            or is_clear_regulatory
+        )
 
         use_ai = not clear_heuristic_trigger and is_catalyst
 
