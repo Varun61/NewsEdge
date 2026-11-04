@@ -313,6 +313,30 @@ class NSEStockResolver:
             return self._symbol_map[matches[0]]
         return None
 
+    def _disambiguate_match(self, info: Optional[dict], norm_headline: str, norm_combined: str) -> Optional[dict]:
+        """Apply entity disambiguation guards to avoid false conglomerate/group mapping."""
+        if not info:
+            return None
+        sym = info.get("symbol")
+
+        # 1. Disambiguation: Anil Ambani ADAG vs Mukesh Ambani RIL
+        if sym == "RELIANCE":
+            full_context = f"{norm_headline} {norm_combined}"
+            adag_indicators = [
+                "anil ambani", "adag", "ada group", "reliance anil ambani",
+                "reliance power", "rpower", "reliance infra", "rinfra",
+                "reliance naval", "reliance capital"
+            ]
+            if any(term in full_context for term in adag_indicators):
+                if "power" in full_context and "RPOWER" in self._symbol_map:
+                    return {**self._symbol_map["RPOWER"], "confidence": 92.0, "match_source": "adag_disambiguation:RPOWER"}
+                elif "infra" in full_context and "RINFRA" in self._symbol_map:
+                    return {**self._symbol_map["RINFRA"], "confidence": 92.0, "match_source": "adag_disambiguation:RINFRA"}
+                logger.info("Filtered false match: Anil Ambani Group / ADAG event detected, excluding from RIL (RELIANCE)")
+                return None
+
+        return info
+
     def resolve_from_text(self, headline: str, body_text: str = "") -> Optional[dict]:
         """Identify the primary listed company and its exact NSE symbol from article text.
 
@@ -330,21 +354,21 @@ class NSEStockResolver:
             cand = ticker_match.group(1).upper()
             if cand in self._symbol_map:
                 info = self._symbol_map[cand]
-                return {**info, "confidence": 98.0, "match_source": "explicit_ticker"}
+                return self._disambiguate_match({**info, "confidence": 98.0, "match_source": "explicit_ticker"}, norm_headline, norm_combined)
 
         # 2. Check for standalone uppercase ticker symbol in headline (e.g. "TCS Q2 results", "BHEL bags order")
         upper_tokens = re.findall(r"\b([A-Z0-9\-]{3,15})\b", cleaned_hl)
         for tok in upper_tokens:
             if tok in self._symbol_map and tok not in SYMBOL_STOPWORDS:
                 info = self._symbol_map[tok]
-                return {**info, "confidence": 96.0, "match_source": f"headline_symbol:{tok}"}
+                return self._disambiguate_match({**info, "confidence": 96.0, "match_source": f"headline_symbol:{tok}"}, norm_headline, norm_combined)
 
         # 3. Check for exact alias/name matches in cleaned headline (longest phrase first)
         for phrase, sym in self._sorted_aliases:
             pattern = rf"\b{re.escape(phrase)}\b"
             if re.search(pattern, norm_headline):
                 info = self._symbol_map[sym]
-                return {**info, "confidence": 95.0, "match_source": f"headline_match:{phrase}"}
+                return self._disambiguate_match({**info, "confidence": 95.0, "match_source": f"headline_match:{phrase}"}, norm_headline, norm_combined)
 
         # 4. Check for 2-word n-grams in cleaned headline
         hl_words = norm_headline.split()
@@ -354,18 +378,18 @@ class NSEStockResolver:
                 if pair in self._alias_map:
                     sym = self._alias_map[pair]
                     info = self._symbol_map[sym]
-                    return {**info, "confidence": 92.0, "match_source": f"headline_ngram:{pair}"}
+                    return self._disambiguate_match({**info, "confidence": 92.0, "match_source": f"headline_ngram:{pair}"}, norm_headline, norm_combined)
                 elif pair in self._name_map:
                     sym = self._name_map[pair]
                     info = self._symbol_map[sym]
-                    return {**info, "confidence": 92.0, "match_source": f"headline_name_ngram:{pair}"}
+                    return self._disambiguate_match({**info, "confidence": 92.0, "match_source": f"headline_name_ngram:{pair}"}, norm_headline, norm_combined)
 
         # 5. Check for exact alias/name matches in combined body text
         for phrase, sym in self._sorted_aliases:
             pattern = rf"\b{re.escape(phrase)}\b"
             if re.search(pattern, norm_combined):
                 info = self._symbol_map[sym]
-                return {**info, "confidence": 85.0, "match_source": f"body_match:{phrase}"}
+                return self._disambiguate_match({**info, "confidence": 85.0, "match_source": f"body_match:{phrase}"}, norm_headline, norm_combined)
 
         # 6. Fuzzy fallback match on headline words against aliases (cutoff 0.88, length >= 6)
         headline_tokens = [w for w in norm_headline.split() if len(w) >= 6 and w not in ALIAS_STOPWORDS]
@@ -375,7 +399,7 @@ class NSEStockResolver:
                 sym = self._alias_map[matches[0]]
                 info = self._symbol_map[sym]
                 if self.verify_mention_presence(sym, info.get("name", sym), headline):
-                    return {**info, "confidence": 75.0, "match_source": f"fuzzy:{matches[0]}"}
+                    return self._disambiguate_match({**info, "confidence": 75.0, "match_source": f"fuzzy:{matches[0]}"}, norm_headline, norm_combined)
 
         return None
 

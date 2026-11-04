@@ -63,12 +63,17 @@ Use these anchors:
   10-24 → News does not relate to a specific listed stock.
 
 ━━━ STEP 4: DIRECTION & CATEGORY ━━━
-Bullish catalysts: order wins, profit surge, revenue growth, buyback, dividend, regulatory approval, debt reduction, capacity expansion.
-Bearish catalysts: SEBI action, ED/CBI/fraud probe, USFDA warning, auditor resignation, loss, profit warning, NPA, credit downgrade, contract cancellation, promoter pledging/selling.
-IMPORTANT: If impact_score > 75, you are placing this stock in the TOP watchlist. Only do this for TRULY MATERIAL events. When in doubt, score lower.
+Bullish catalysts: order wins, profit surge (>25%), revenue growth, buyback, dividend, regulatory approval, regulatory fee cuts/relaxation of compliance norms, debt reduction, capacity expansion.
+Bearish catalysts: SEBI action/penalties, ED/CBI/fraud probe, USFDA warning/import alert, auditor resignation, loss, profit warning, NPA, credit downgrade, contract cancellation, promoter pledging/selling.
+IMPORTANT:
+- Regulatory fee cuts (e.g. IRDAI cutting processing fees, SEBI reducing transaction charges) or approvals (e.g. CCI approving M&A) are BULLISH/POSITIVE (operational cost savings/business expansion), NOT bearish!
+- If impact_score > 75, you are placing this stock in the TOP watchlist. Only do this for TRULY MATERIAL events. When in doubt, score lower.
 
 ━━━ STEP 5: REALISM CHECK ━━━
+- Profit growth under 15% (especially single digits e.g. 6%) when revenue is high shows margin compression = impact_score ≤ 55
 - Routine quarterly results with <10% growth = impact_score ≤ 55
+- Anil Ambani (ADAG, Reliance Power, Reliance Infra) legal/enforcement actions must NOT be assigned to Mukesh Ambani's Reliance Industries (RELIANCE)
+- Headlines describing past market rallies (e.g. "shares surge 17%", "rallied 80% from IPO") reflect ALREADY-PRICED past momentum = impact_score ≤ 50, expected_direction = neutral
 - MoU/LoI (letter of intent, not confirmed order) = impact_score ≤ 60, confidence ≤ 60
 - Order win with no ₹ value stated = impact_score ≤ 65
 - Any news where the company is mentioned only incidentally = confidence ≤ 40
@@ -139,6 +144,12 @@ class BaseAIProvider(ABC):
         pct_matches = re.findall(r"(\d+(?:\.\d+)?)\s*%", headline)
         pct_val = max([float(p) for p in pct_matches]) if pct_matches else 0.0
 
+        # Extract specific profit percentage vs revenue percentage
+        profit_pct_match = re.search(r"(?:net\s+)?profit\s+(?:rises|jumps|surges|up|grows)\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*%", headline, re.IGNORECASE)
+        revenue_pct_match = re.search(r"(?:revenue|sales)\s+(?:rises|jumps|surges|up|grows)\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*%", headline, re.IGNORECASE)
+        profit_pct = float(profit_pct_match.group(1)) if profit_pct_match else None
+        revenue_pct = float(revenue_pct_match.group(1)) if revenue_pct_match else None
+
         # Extract monetary values (crores)
         cr_matches = re.findall(r"(?:(?:rs\.?|inr|₹)\s*)?([\d,]+(?:\.\d+)?)\s*(?:crore|cr)\b", headline, re.IGNORECASE)
         cr_val = max([float(c.replace(",", "")) for c in cr_matches]) if cr_matches else 0.0
@@ -150,6 +161,18 @@ class BaseAIProvider(ABC):
         impact = 50.0
         materiality = "Routine business announcement or sector commentary."
         risks = ["Lack of distinct price catalyst"]
+
+        # ── 0. Deregulatory Relief / Fee Cuts ───────────────────────────────────
+        is_regulatory_relief = (
+            bool(re.search(r"\b(?:cuts?|slashes?|reduces?|lowers?)\b.*\b(?:processing\s+|application\s+|compliance\s+|registration\s+)?fee", h_lower))
+            or any(
+                phrase in h_lower
+                for phrase in [
+                    "fee cut", "processing fee cut", "fee reduction",
+                    "relaxes norm", "eases norm", "eases rule", "relaxes rule", "compliance relief"
+                ]
+            )
+        )
 
         # ── 1. Severe Bearish Triggers ──────────────────────────────────────────
         SEVERE_BEARISH = [
@@ -169,7 +192,16 @@ class BaseAIProvider(ABC):
             "ceo resigns", "md resigns", "cfo resigns", "steps down", "downgrade", "target cut",
         ]
 
-        if any(w in h_lower for w in SEVERE_BEARISH):
+        if is_regulatory_relief:
+            cat = "REGULATORY_APPROVAL"
+            sent = "POSITIVE"
+            direction = "bullish"
+            impact = 65.0
+            match_confidence = max(match_confidence, 72.0)
+            materiality = "Deregulatory fee reduction or administrative compliance easing reducing operational overhead."
+            risks = ["Marginal financial impact", "Sector-wide rather than company-specific"]
+
+        elif any(w in h_lower for w in SEVERE_BEARISH):
             cat = "REGULATORY_ACTION" if any(x in h_lower for x in ["sebi", "penalty", "fine", "usfda"]) else "FRAUD_OR_GOVERNANCE"
             sent = "VERY_NEGATIVE"
             direction = "bearish"
@@ -244,16 +276,27 @@ class BaseAIProvider(ABC):
 
         elif any(w in h_lower for w in PROFIT_KEYWORDS):
             cat = "PROFIT_GROWTH"
-            sent = "VERY_POSITIVE" if pct_val >= 50 else "POSITIVE"
             direction = "bullish"
-            impact = 76.0 + (12.0 if pct_val >= 50 else 7.0 if pct_val >= 25 else 0.0)
-            if pct_val >= 20:
-                match_confidence = max(match_confidence, 78.0)
-            materiality = (
-                f"Quarterly profit expansion ({pct_val:.1f}% surge) driving earnings momentum."
-                if pct_val
-                else "Strong quarterly financial expansion driving earnings momentum."
-            )
+            effective_pct = profit_pct if profit_pct is not None else pct_val
+
+            if profit_pct is not None and profit_pct < 15.0:
+                # Modest profit growth (especially when revenue is high) signals margin compression
+                sent = "NEUTRAL"
+                impact = 56.0
+                match_confidence = min(match_confidence, 60.0)
+                materiality = f"Modest profit growth ({profit_pct:.1f}%); potential margin compression vs expectations."
+                risks = ["Margin compression", "Profit booking on subdued bottom-line growth"]
+            else:
+                sent = "VERY_POSITIVE" if effective_pct >= 50 else "POSITIVE"
+                impact = 76.0 + (12.0 if effective_pct >= 50 else 7.0 if effective_pct >= 25 else 0.0)
+                if effective_pct >= 20:
+                    match_confidence = max(match_confidence, 78.0)
+                materiality = (
+                    f"Quarterly profit expansion ({effective_pct:.1f}% surge) driving earnings momentum."
+                    if effective_pct
+                    else "Strong quarterly financial expansion driving earnings momentum."
+                )
+                risks = ["Already priced-in expectations", "Profit taking after initial surge", "General market headwinds"]
             risks = ["Already priced-in expectations", "Profit taking after initial surge", "General market headwinds"]
 
         elif any(w in h_lower for w in SHAREHOLDER_BULLISH):

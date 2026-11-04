@@ -115,7 +115,13 @@ class ScoringEngine:
         bearish_cats = {"PROFIT_WARNING", "FRAUD_OR_GOVERNANCE", "REGULATORY_ACTION", "CONTRACT_CANCELLATION", "LEGAL_ISSUE"}
         bullish_cats = {"ORDER_WIN", "PROFIT_GROWTH", "REVENUE_GROWTH", "CAPACITY_EXPANSION", "REGULATORY_APPROVAL", "BUYBACK"}
 
-        if cat_str in bearish_cats and "bullish" in direction:
+        # Regulatory relief check (e.g. IRDAI cutting processing fees, SEBI reducing charges)
+        regulatory_relief_keywords = ["cuts fee", "cut fee", "slashes fee", "reduces fee", "fee cut", "processing fee cut", "relaxes norm", "eases norm"]
+        is_reg_relief = any(kw in event.primary_headline.lower() for kw in regulatory_relief_keywords)
+
+        if cat_str == "REGULATORY_ACTION" and is_reg_relief:
+            direction = "bullish"
+        elif cat_str in bearish_cats and "bullish" in direction:
             logger.warning("Direction mismatch for event #%d: Category %s cannot be bullish. Overriding to bearish.", event.id, cat_str)
             direction = "bearish"
         elif cat_str in bullish_cats and "bearish" in direction:
@@ -155,6 +161,18 @@ class ScoringEngine:
         if classification.news_category in ("BUSINESS_UPDATE", "OTHER", "SHAREHOLDING_CHANGE") and \
                 classification.impact_score < 65.0:
             penalties["routine_low_signal"] = -8.0
+        # Backward-looking past price action report (exhausted momentum)
+        import re
+        headline_lower = event.primary_headline.lower()
+        past_surge_patterns = [
+            r"\b(?:shares|stock)\b.*\b(?:surge\w*|skyrocket\w*|rally\w*|rallied|jump\w*|jumped|gain\w*|gained|soar\w*)\b.*\b(?:\d+%\b|\d+\s*percent)",
+            r"\b(?:rallies|surges|jumps|zooms|skyrockets)\b\s+(?:whopping\s+)?(?:\d+%\b|\d+\s*percent)",
+            r"\b(?:hits|hit|touches|scaled)\b.*\b(?:52-week high|record high|all-time high|new high)\b",
+            r"\bup\s+(?:\d+%\b|\d+\s*percent)\s+(?:since|in\s+\d+|from\s+ipo)",
+        ]
+        is_past_price_report = any(bool(re.search(pat, headline_lower)) for pat in past_surge_patterns)
+        if is_past_price_report and not any(kw in headline_lower for kw in ["bags order", "wins contract", "secures order", "awarded"]):
+            penalties["past_price_action_exhaustion"] = -12.0
 
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 

@@ -70,7 +70,7 @@ SECTOR_THEMATIC_RULES: List[SectorRule] = [
         theme_id="INSURANCE_COMMISSION_CUT",
         theme_title="IRDAI Insurance Commission & Surrender Value Regulation",
         trigger_patterns=[
-            r"\b(?:irdai|insurance regulator)\b.*\b(?:cut\w*|cap\w*|lower\w*|slash\w*|reduc\w*|curb\w*)\b.*\b(?:commission\w*|payout\w*|fee\w*|charge\w*)\b",
+            r"\b(?:irdai|insurance regulator)\b.*\b(?:cut\w*|cap\w*|lower\w*|slash\w*|reduc\w*|curb\w*)\b.*\b(?:commission\w*|distributor payout\w*|agent payout\w*|broker fee\w*)\b",
             r"\b(?:insurance|life insurance|health insurance)\b.*\b(?:commission\w*|broker fee\w*)\b.*\b(?:cut\w*|cap\w*|slash\w*|reduc\w*|limit\w*)\b",
             r"\b(?:irdai|insurance)\b.*\b(?:surrender value\w*|surrender payout\w*)\b.*\b(?:hike\w*|increase\w*|mandat\w*|rule\w*|norm\w*)\b",
         ],
@@ -435,6 +435,12 @@ class ThematicEngine:
         impacts: List[ThematicImpact] = []
 
         for rule in self.rules:
+            # Skip false matches on administrative/processing fee reductions for insurance commission rule
+            if rule.theme_id == "INSURANCE_COMMISSION_CUT" and any(
+                w in combined for w in ["processing fee", "share transfer", "application fee", "filing fee", "registration fee"]
+            ):
+                continue
+
             if any(re.search(pat, combined) for pat in rule.trigger_patterns):
                 logger.info("Matched thematic policy catalyst: '%s' on headline: %s", rule.theme_title, headline[:60])
 
