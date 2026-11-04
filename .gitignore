@@ -14,10 +14,11 @@ dist/
 build/
 *.egg
 
-# Database
+# Database & Cache
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/*_cache.json
 
 # Logs and reports (generated output — not committed)
 logs/*.log

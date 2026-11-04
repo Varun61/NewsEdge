@@ -161,6 +161,11 @@ class ScoringEngine:
         if classification.news_category in ("BUSINESS_UPDATE", "OTHER", "SHAREHOLDING_CHANGE") and \
                 classification.impact_score < 65.0:
             penalties["routine_low_signal"] = -8.0
+        # Capacity expansion & buyback sell-on-news dampener (lacks immediate intraday earnings velocity)
+        if cat_str == "CAPACITY_EXPANSION" and not any(kw in headline_lower for kw in ["bags order", "wins contract", "commissions"]):
+            penalties["long_gestation_capex"] = -10.0
+        if cat_str == "BUYBACK":
+            penalties["buyback_sell_on_news"] = -8.0
         # Backward-looking past price action report (exhausted momentum)
         import re
         headline_lower = event.primary_headline.lower()
@@ -201,8 +206,11 @@ class ScoringEngine:
             )
             return analysis
 
-        # 6. Determine Classification Priority (tighter thresholds for STRONG tiers)
-        if is_negative:
+        # 6. Determine Classification Priority (tighter thresholds for actionable tiers)
+        if cat_str in ("BUSINESS_UPDATE", "OTHER"):
+            # Routine commentary and generic updates never qualify for Bullish/Bearish trade watchlists
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif is_negative:
             if final_score >= 78.0:
                 candidate_class = CandidateClassification.STRONG_BEARISH
             elif final_score >= 60.0:
@@ -214,7 +222,7 @@ class ScoringEngine:
         elif "bullish" in direction or classification.sentiment in ("VERY_POSITIVE", "POSITIVE"):
             if final_score >= 78.0:
                 candidate_class = CandidateClassification.STRONG_BULLISH
-            elif final_score >= 60.0:
+            elif final_score >= 64.0:
                 candidate_class = CandidateClassification.BULLISH
             elif final_score >= 46.0:
                 candidate_class = CandidateClassification.WATCH_ONLY

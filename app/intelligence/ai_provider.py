@@ -184,12 +184,16 @@ class BaseAIProvider(ABC):
         ]
         MODERATE_BEARISH = [
             "net loss", "quarterly loss", "profit falls", "profit slumps", "profit drops",
-            "net drops", "revenue declines", "sales fall", "margin contracts",
-            "npa", "non-performing asset", "credit rating downgrade", "rating cut",
+            "net drops", "revenue declines", "sales fall", "sales drop", "sales decline",
+            "volume decline", "volume drop", "dispatches decline", "dispatches drop",
+            "margin contracts", "npa", "non-performing asset", "credit rating downgrade",
+            "rating cut", "downgrade", "target cut", "target price cut", "slashes target price",
+            "downgrade to sell", "downgrades to sell", "downgraded to sell", "underperform rating",
             "promoter pledge", "promoter pledging", "pledge invoked", "margin call",
-            "debt covenant", "loan default", "default on",
+            "promoter sells", "promoter stake sale", "ofs discount", "block deal at discount",
+            "debt covenant", "loan default", "default on", "tax notice", "gst demand", "tax demand",
             "contract cancelled", "contract cancellation", "order cancelled",
-            "ceo resigns", "md resigns", "cfo resigns", "steps down", "downgrade", "target cut",
+            "ceo resigns", "md resigns", "cfo resigns", "steps down",
         ]
 
         if is_regulatory_relief:
