@@ -63,6 +63,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger("backtest_one_month")
 
 CACHE_FILE = PROJECT_ROOT / "data" / "backtest_articles_cache.json"
+PRICES_CACHE_FILE = PROJECT_ROOT / "data" / "backtest_prices_cache.json"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -200,10 +201,28 @@ def fetch_historical_prices_batch(
     end_date: date,
 ) -> dict[str, dict[date, DailyPrice]]:
     """Download OHLCV for all symbols and compute daily return metrics."""
-    logger.info("Downloading historical prices for %d symbols (%s to %s)...", len(symbols), start_date, end_date)
-    
-    yf_symbols = [f"{s}.NS" for s in symbols]
     history: dict[str, dict[date, DailyPrice]] = defaultdict(dict)
+
+    # 1. Try loading from cache
+    cached_data = {}
+    if PRICES_CACHE_FILE.exists():
+        try:
+            with open(PRICES_CACHE_FILE, "r", encoding="utf-8") as f:
+                cached_data = json.load(f)
+                for sym, dates_dict in cached_data.items():
+                    for dt_s, p_dict in dates_dict.items():
+                        history[sym][date.fromisoformat(dt_s)] = DailyPrice(**p_dict)
+            logger.info("Loaded cached prices for %d symbols", len(history))
+        except Exception as e:
+            logger.warning("Failed to load price cache: %s", e)
+
+    missing_symbols = [s for s in symbols if s not in history or len(history[s]) < 10]
+    if not missing_symbols:
+        logger.info("All %d symbols found in price cache. Skipping download.", len(symbols))
+        return history
+
+    logger.info("Downloading historical prices for %d missing symbols (%s to %s)...", len(missing_symbols), start_date, end_date)
+    yf_symbols = [f"{s}.NS" for s in missing_symbols]
     
     # Download in batches of 40 symbols
     chunk_size = 40
@@ -258,6 +277,18 @@ def fetch_historical_prices_batch(
         except Exception as e:
             logger.warning("Error fetching batch %d: %s", i, e)
         time.sleep(0.5)
+
+    # Save to price cache
+    try:
+        to_save = {}
+        for sym, d_map in history.items():
+            to_save[sym] = {dt.isoformat(): asdict(dp) for dt, dp in d_map.items()}
+        PRICES_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(PRICES_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(to_save, f)
+        logger.info("Price cache saved with %d symbols.", len(to_save))
+    except Exception as e:
+        logger.warning("Failed to save price cache: %s", e)
 
     return history
 

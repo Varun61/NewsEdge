@@ -174,13 +174,23 @@ class BaseAIProvider(ABC):
             )
         )
 
-        # ── 1. Severe Bearish Triggers ──────────────────────────────────────────
+        # ── 1. Severe Bearish & Market Rejection Triggers ───────────────────────
         SEVERE_BEARISH = [
             "sebi ban", "sebi suspension", "sebi order", "sebi penalty", "sebi fine",
             "usfda import alert", "usfda warning letter", "form 483", "import alert",
             "ed raid", "ed summons", "cbi probe", "enforcement directorate",
             "auditor resign", "auditor quits", "statutory auditor",
             "nclt insolvency", "insolvency petition", "fraud", "scam", "embezzle",
+        ]
+        MARKET_REJECTION = [
+            "shares crash", "stock crashes", "stock crash", "shares crash",
+            "shares tumble", "stock tumbles", "shares plunge", "stock plunges",
+            "shares slump", "stock slumps", "shares tank", "stock tanks",
+            "shares fall", "stock falls", "shares dive", "stock dives",
+            "shares slide", "stock slides", "stock sinks", "shares sink",
+            "profit sinks", "net sinks", "profit plummets", "net plummets",
+            "profit tumbles", "net tumbles", "profit slides", "profit slumps",
+            "margin contracts sharply", "margins shrink", "guidance cut",
         ]
         MODERATE_BEARISH = [
             "net loss", "quarterly loss", "profit falls", "profit slumps", "profit drops",
@@ -195,6 +205,12 @@ class BaseAIProvider(ABC):
             "contract cancelled", "contract cancellation", "order cancelled",
             "ceo resigns", "md resigns", "cfo resigns", "steps down",
         ]
+
+        # Retrospective post-market reporting of already concluded price action
+        is_retrospective_rally = bool(re.search(
+            r"\b(?:shares?|stocks?)\s+(?:surge\w*|rall\w*|jump\w*|rose|gain\w*|climb\w*|skyrocket\w*)\s+(?:over\s+|nearly\s+|up\s+to\s+)?(?:\d+%\b|\d+\s*percent|\d+\s*pts)",
+            h_lower
+        )) and not any(kw in h_lower for kw in ["bags order", "secures order", "wins contract", "awarded order", "wins order"])
 
         if is_regulatory_relief:
             cat = "REGULATORY_APPROVAL"
@@ -214,6 +230,15 @@ class BaseAIProvider(ABC):
             materiality = "Severe regulatory/governance risk with immediate intraday downside selling pressure."
             risks = ["Panic selling at open", "Prolonged institutional derating", "Reputational overhang"]
 
+        elif any(w in h_lower for w in MARKET_REJECTION):
+            cat = "PROFIT_WARNING" if any(x in h_lower for x in ["profit", "net", "loss", "margin", "q1", "q2", "q3", "q4"]) else "BUSINESS_UPDATE"
+            sent = "VERY_NEGATIVE" if any(x in h_lower for x in ["crash", "plunge", "tank", "sinks"]) else "NEGATIVE"
+            direction = "bearish"
+            impact = 78.0
+            match_confidence = max(match_confidence, 80.0)
+            materiality = "Severe market rejection or sharp operating margin contraction."
+            risks = ["Institutional exit", "Technical breakdown", "Further downside continuation"]
+
         elif any(w in h_lower for w in MODERATE_BEARISH):
             cat = (
                 "PROFIT_WARNING" if any(x in h_lower for x in ["profit", "net", "loss", "npa", "revenue"])
@@ -230,6 +255,15 @@ class BaseAIProvider(ABC):
             materiality = f"Disappointing operating performance ({pct_val:.1f}% drop)" if pct_val else "Disappointing operating performance or governance concern."
             risks = ["Gap-down open", "Negative earnings revision", "Further sell-off below key support"]
 
+        elif is_retrospective_rally:
+            cat = "BUSINESS_UPDATE"
+            sent = "NEUTRAL"
+            direction = "neutral"
+            impact = 45.0
+            match_confidence = min(match_confidence, 50.0)
+            materiality = "Retrospective media recap of concluded price surge; momentum exhausted for next session."
+            risks = ["Profit-taking after initial surge", "Gap-fade on open"]
+
         # ── 2. Strong Bullish Triggers ──────────────────────────────────────────
         ORDER_KEYWORDS = [
             "order win", "wins order", "bags order", "bags contract", "secures order", "secures deal",
@@ -238,9 +272,8 @@ class BaseAIProvider(ABC):
         ]
         PROFIT_KEYWORDS = [
             "profit up", "profit jumps", "profit surges", "profit doubles", "profit rises",
-            "net profit up", "net profit jumps", "net doubles", "q4 profit", "q3 profit",
-            "q2 profit", "q1 profit", "revenue rises", "revenue surges", "sales surge",
-            "ebitda jumps", "ebitda rises",
+            "net profit up", "net profit jumps", "net profit rises", "net doubles",
+            "revenue rises", "revenue surges", "sales surge", "ebitda jumps", "ebitda rises",
         ]
         SHAREHOLDER_BULLISH = [
             "buyback", "bonus issue", "stock split", "special dividend",
