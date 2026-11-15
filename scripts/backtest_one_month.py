@@ -549,6 +549,16 @@ def run_pipeline_for_day(
         if is_caution_tone:
             penalties -= 14.0
 
+        # Automated Concall Guidance & Commentary Analysis
+        from app.intelligence.concall_analyzer import get_concall_analyzer
+        concall_eval = get_concall_analyzer().analyze_text(f"{hl} {summary}")
+        if concall_eval.score_modifier < 0:
+            penalties += concall_eval.score_modifier
+            if concall_eval.is_guidance_cut:
+                is_neg_guidance = True
+        elif concall_eval.score_modifier > 0 and cls_res.expected_direction == "bullish":
+            penalties += concall_eval.score_modifier
+
         final_score = max(0.0, min(100.0, raw_score + penalties))
 
         # Hard minimum confidence gate

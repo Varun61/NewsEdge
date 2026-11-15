@@ -6,6 +6,7 @@ import logging
 from typing import Dict, List
 
 from app.collectors.base_collector import BaseCollector
+from app.collectors.news_collectors.brokerage_radar import BrokerageRadarCollector
 from app.collectors.news_collectors.business_standard import BusinessStandardCollector
 from app.collectors.news_collectors.cnbc_tv18 import CNBCTV18Collector
 from app.collectors.news_collectors.economic_times import ETMarketsCollector
@@ -69,6 +70,7 @@ def build_default_registry() -> CollectorRegistry:
     registry.register(MoneycontrolResultsCollector(enabled=True))
     registry.register(TheCoreEarningsCollector(enabled=True))
     registry.register(ScreenerCollector(enabled=True))
+    registry.register(BrokerageRadarCollector(enabled=True))
 
     # Official exchange announcements
     registry.register(NSEAnnouncementCollector(enabled=True))

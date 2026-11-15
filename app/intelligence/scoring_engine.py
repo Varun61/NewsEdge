@@ -335,6 +335,33 @@ class ScoringEngine:
         except Exception:
             pass  # Sector momentum is optional; continue without it
 
+        # ── TECHNICAL TREND CONTEXT ───────────────────────────────────────
+        try:
+            from app.intelligence.technical_trend import get_technical_trend_analyzer
+            trend_analyzer = get_technical_trend_analyzer()
+            if event_symbol:
+                trend_eval = trend_analyzer.get_trend_evaluation(event_symbol, direction)
+                if trend_eval:
+                    if trend_eval.score_modifier < 0:
+                        penalties["technical_counter_trend"] = trend_eval.score_modifier
+                    elif trend_eval.score_modifier > 0 and is_positive:
+                        penalties["technical_uptrend_tailwind"] = trend_eval.score_modifier
+        except Exception:
+            pass
+
+        # ── CONCALL COMMENTARY ALIGNMENT ──────────────────────────────────
+        try:
+            from app.intelligence.concall_analyzer import get_concall_analyzer
+            concall_analyzer = get_concall_analyzer()
+            full_c_text = f"{event.primary_headline} {event.news_summary or ''}"
+            concall_eval = concall_analyzer.analyze_text(full_c_text)
+            if concall_eval.score_modifier < 0:
+                penalties["concall_headwind"] = concall_eval.score_modifier
+            elif concall_eval.score_modifier > 0 and is_positive:
+                penalties["concall_tailwind"] = concall_eval.score_modifier
+        except Exception:
+            pass
+
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 
         # 5. Hard minimum-confidence gate — if we can't verify the company, exclude from watchlist
@@ -383,6 +410,9 @@ class ScoringEngine:
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
         elif ("subpar_growth_deceleration" in penalties or "largecap_modest_growth" in penalties or "revenue_profit_divergence" in penalties or "exceptional_items_inflation" in penalties) and final_score < 78.0:
             # Growth deceleration, bellwether modest growth, or accounting quality issues → WATCH_ONLY
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif "technical_counter_trend" in penalties and is_positive and final_score < 80.0:
+            # Stock is in structural downtrend (Price < 20 EMA and 50 EMA) - avoid counter-trend trap
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
         elif is_negative:
             if final_score >= 78.0:

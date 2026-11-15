@@ -360,8 +360,11 @@ class TelegramFormatter:
         card = [
             f"{rank}. {tier}<code>{_esc(symbol)}</code> • <b>{_esc(comp_name)}</b>",
             f"   {_esc(concise_news)}{link_html}",
-            "",
         ]
+        if analysis.penalties and "technical_counter_trend" in analysis.penalties:
+            card.append("   ⚠️ <i>Counter-trend bounce: stock is below 20/50 EMA.</i>")
+
+        card.append("")
         return card
 
     @classmethod

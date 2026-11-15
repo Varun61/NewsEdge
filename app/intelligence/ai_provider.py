@@ -330,6 +330,13 @@ class BaseAIProvider(ABC):
             "fda approval", "usfda approval", "gets usfda", "receives fda",
             "capacity expansion", "commissions plant", "inaugurates plant",
         ]
+        BROKERAGE_UPGRADES = [
+            "raises target", "hikes target", "upgrade to buy", "upgrades to buy",
+            "upgraded to buy", "outperform rating", "overweight rating",
+            "initiates coverage with buy", "target price raised", "bullish on",
+            "clsa raises", "jefferies raises", "morgan stanley raises", "nomura raises",
+            "goldman sachs raises", "motilal oswal raises", "target raised",
+        ]
         GENERAL_BULLISH = [
             "signs mou", "mou signed", "strategic partnership", "debt free",
             "prepays debt", "acquires stake", "qip launch", "preferential allotment",
@@ -405,6 +412,15 @@ class BaseAIProvider(ABC):
                 match_confidence = max(match_confidence, 80.0)
             materiality = "Shareholder value accretive action or strategic regulatory milestone."
             risks = ["Limited liquidity follow-through", "Broader sector weakness"]
+
+        elif cat is None and any(w in h_lower for w in BROKERAGE_UPGRADES):
+            cat = "PROFIT_GROWTH"
+            sent = "VERY_POSITIVE"
+            direction = "bullish"
+            impact = 80.0
+            match_confidence = max(match_confidence, 82.0)
+            materiality = "Sell-side brokerage upgrade or target price hike supporting institutional accumulation."
+            risks = ["Broader market sentiment", "Consensus already optimistic"]
 
         elif cat is None and any(w in h_lower for w in GENERAL_BULLISH):
             cat = (
