@@ -53,7 +53,7 @@ from app.database.models import (
 )
 from app.intelligence.ai_provider import ClassificationResult
 from app.intelligence.ollama_provider import OllamaProvider
-from app.intelligence.scoring_engine import ScoringEngine
+from app.intelligence.scoring_engine import INSTITUTIONAL_BELLWETHERS, ScoringEngine
 from app.intelligence.thematic_engine import get_thematic_engine
 from app.processors.entity_extractor import EntityExtractor
 from app.processors.nse_master import clean_headline_publisher, get_nse_resolver
@@ -275,7 +275,15 @@ def fetch_historical_prices_batch(
 
             for yf_sym in chunk:
                 sym = reverse_map.get(yf_sym, yf_sym.replace(".NS", ""))
-                sym_df = df[yf_sym] if len(chunk) > 1 else df
+                try:
+                    if hasattr(df.columns, "levels") and yf_sym in df.columns:
+                        sym_df = df[yf_sym]
+                    elif len(chunk) > 1 and yf_sym in df:
+                        sym_df = df[yf_sym]
+                    else:
+                        sym_df = df
+                except Exception:
+                    sym_df = df
                 if sym_df.empty:
                     continue
                 
@@ -496,6 +504,51 @@ def run_pipeline_for_day(
         if is_neg_guidance:
             penalties -= 18.0
 
+        # Earnings Quality Gate: Revenue-Profit divergence (inflated by one-offs)
+        is_rev_profit_divergence = False
+        p_g_m = re.search(r"\b(?:profit|pat|net)\b.*?\b(?:rises?|jumps?|surges?|up|grows?)\b\s+(?:by\s+)?(\d+(?:\.\d+)?)%", hl_lower)
+        r_g_m = re.search(r"\b(?:revenue|sales|turnover)\b.*?\b(?:rises?|jumps?|surges?|up|grows?)\b\s+(?:by\s+)?(\d+(?:\.\d+)?)%", hl_lower)
+        if p_g_m and r_g_m:
+            if float(p_g_m.group(1)) > float(r_g_m.group(1)) + 25 and float(r_g_m.group(1)) < 15:
+                penalties -= 12.0
+                is_rev_profit_divergence = True
+
+        # Exceptional items / one-off inflation
+        is_exceptional_gain = any(re.search(pat, hl_lower) for pat in [
+            r"\bexceptional\s+(?:item|gain|income)",
+            r"\bone[- ]time\s+(?:gain|income|benefit)",
+            r"\bnon[- ]recurring\s+(?:income|gain)",
+            r"\bother\s+income\s+(?:jumps?|surges?|rises?|up|boost)",
+            r"\bextraordinary\s+(?:item|gain|income)",
+            r"\btax\s+(?:write[- ]?back|reversal|refund)\s+(?:boost|lifts?|aids?)",
+        ])
+        if is_exceptional_gain:
+            penalties -= 15.0
+
+        # Large-cap modest growth (<15% profit growth for bellwethers)
+        is_largecap_modest_growth = False
+        if sym in INSTITUTIONAL_BELLWETHERS:
+            bw_m = re.search(r"\b(?:profit|pat|net)\b.*?\b(?:rises?|up|grows?|jumps?)\b\s+(?:by\s+)?(\d+(?:\.\d+)?)%", hl_lower)
+            if bw_m and float(bw_m.group(1)) < 15.0:
+                penalties -= 14.0
+                is_largecap_modest_growth = True
+
+        # Management caution / concall tone headwind
+        is_caution_tone = any(re.search(pat, hl_lower) for pat in [
+            r"\bcautious\s+(?:on|about|outlook|management)",
+            r"\bmanagement\s+(?:cautious|warns?|sees?\s+challenges?)",
+            r"\bchallenging\s+(?:quarter|environment|outlook|macro)",
+            r"\bweak\s+(?:demand|pipeline|order\s*book|commentary)",
+            r"\bslower\s+(?:growth|recovery|momentum|deal\s+wins?)",
+            r"\bheadwinds?\b",
+            r"\bmuted\s+(?:outlook|guidance|growth|commentary)",
+            r"\bpressure\s+on\s+(?:margins?|growth|revenue)",
+            r"\bmanagement\s+(?:commentary|tone)\s+(?:negative|weak|cautious|disappointing)",
+            r"\bdisappointing\s+(?:guidance|commentary|outlook|concall)",
+        ])
+        if is_caution_tone:
+            penalties -= 14.0
+
         final_score = max(0.0, min(100.0, raw_score + penalties))
 
         # Hard minimum confidence gate
@@ -509,8 +562,10 @@ def run_pipeline_for_day(
             continue
         if cat_str == "BUYBACK" and final_score < 78.0:
             continue
-        if is_margin_compression or is_subpar_growth:
-            # Margin compression or sub-par growth invalidates bullish trade thesis
+        if is_margin_compression or is_subpar_growth or is_caution_tone:
+            # Margin compression, sub-par growth, or caution tone invalidates bullish trade thesis
+            continue
+        if (is_largecap_modest_growth or is_rev_profit_divergence or is_exceptional_gain) and final_score < 78.0:
             continue
         if is_unquantified_order and final_score < 78.0:
             continue

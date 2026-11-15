@@ -7,6 +7,9 @@ Implements institutional-grade intraday intelligence logic:
 - Multi-Source Confirmation: Independent verification across top publishers increases conviction.
 - Overnight Freshness Decay: Maximizes priority for announcements occurring between
   yesterday's 15:30 close and today's 08:00 open.
+- Earnings Quality Gate: Detects revenue-profit divergence, one-off items, large-cap
+  modest growth, and management caution tone to filter false-positive bullish signals.
+- Sector Momentum Context: Adjusts conviction based on broad market / sectoral index direction.
 """
 
 from __future__ import annotations
@@ -29,12 +32,39 @@ from app.intelligence.ai_provider import ClassificationResult
 logger = logging.getLogger("newsedge.intelligence.scoring")
 
 
+    # Institutional bellwether / large-cap stocks where <15% profit growth is a SELL signal
+    # (institutional consensus expects high-teens to 20%+ growth; single-digit growth = disappointment)
+INSTITUTIONAL_BELLWETHERS = {
+    # Banking & Finance
+    "HDFCBANK", "ICICIBANK", "SBIN", "AXISBANK", "KOTAKBANK", "BAJFINANCE", "BAJAJFINSV",
+    "INDUSINDBK", "BANKBARODA", "PNB", "CANBK",
+    # IT Services
+    "INFY", "TCS", "WIPRO", "HCLTECH", "TECHM", "LTIM", "MPHASIS", "COFORGE", "PERSISTENT",
+    # FMCG
+    "HINDUNILVR", "ITC", "NESTLEIND", "BRITANNIA", "COLPAL", "DABUR", "MARICO",
+    "GODREJCP", "TATACONSUM", "EMAMILTD",
+    # Pharma
+    "SUNPHARMA", "DRREDDY", "CIPLA", "DIVISLAB", "AUROPHARMA", "BIOCON", "LUPIN",
+    # Auto
+    "MARUTI", "TATAMOTORS", "M&M", "BAJAJ-AUTO", "EICHERMOT", "HEROMOTOCO", "ASHOKLEY",
+    # Metals & Mining
+    "JSWSTEEL", "TATASTEEL", "HINDALCO", "VEDL", "COALINDIA", "NMDC",
+    # Energy & Oil
+    "RELIANCE", "ONGC", "BPCL", "IOC", "GAIL", "NTPC", "POWERGRID", "ADANIGREEN",
+    # Infrastructure & Engineering
+    "LT", "ADANIENT", "ADANIPORTS", "ULTRACEMCO", "GRASIM", "SHREECEM",
+    # Others
+    "BHARTIARTL", "ASIANPAINT", "TITAN", "PIDILITIND", "BERGEPAINT",
+    "HAVELLS", "VOLTAS", "SIEMENS", "ABB", "TRENT",
+}
+
+
 class ScoringEngine:
     """Calculates overall 0-100 score and assigns candidate priority."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.version = "1.1"
+        self.version = "1.2"
 
     def _calculate_freshness_score(self, event_time: Optional[datetime]) -> float:
         """Exponential decay based on age in hours."""
@@ -233,6 +263,78 @@ class ScoringEngine:
         if any(re.search(pat, headline_lower) for pat in negative_guidance_patterns):
             penalties["negative_forward_guidance"] = -18.0
 
+        # ── EARNINGS QUALITY GATE ─────────────────────────────────────────
+        # Revenue-Profit divergence: profit inflated by one-offs / exceptional items
+        profit_g_match = re.search(
+            r"\b(?:profit|pat|net)\b.*?\b(?:rises?|jumps?|surges?|up|grows?)\b\s+(?:by\s+)?(\d+(?:\.\d+)?)%",
+            headline_lower,
+        )
+        revenue_g_match = re.search(
+            r"\b(?:revenue|sales|turnover)\b.*?\b(?:rises?|jumps?|surges?|up|grows?)\b\s+(?:by\s+)?(\d+(?:\.\d+)?)%",
+            headline_lower,
+        )
+        if profit_g_match and revenue_g_match:
+            profit_g = float(profit_g_match.group(1))
+            revenue_g = float(revenue_g_match.group(1))
+            # If profit grows 50%+ but revenue only grows <15%, profit is likely inflated by one-offs
+            if profit_g > revenue_g + 25 and revenue_g < 15:
+                penalties["revenue_profit_divergence"] = -12.0
+
+        # Exceptional / one-time / non-recurring income inflating results
+        exceptional_patterns = [
+            r"\bexceptional\s+(?:item|gain|income)",
+            r"\bone[- ]time\s+(?:gain|income|benefit)",
+            r"\bnon[- ]recurring\s+(?:income|gain)",
+            r"\bother\s+income\s+(?:jumps?|surges?|rises?|up|boost)",
+            r"\bextraordinary\s+(?:item|gain|income)",
+            r"\btax\s+(?:write[- ]?back|reversal|refund)\s+(?:boost|lifts?|aids?)",
+        ]
+        if any(re.search(pat, headline_lower) for pat in exceptional_patterns):
+            penalties["exceptional_items_inflation"] = -15.0
+
+        # Large-cap modest growth: institutional sell-the-news for blue chips
+        company = event.primary_company
+        event_symbol = company.nse_symbol if company else ""
+        if event_symbol in INSTITUTIONAL_BELLWETHERS:
+            bellwether_growth = re.search(
+                r"\b(?:profit|pat|net)\b.*?\b(?:rises?|up|grows?|jumps?)\b\s+(?:by\s+)?(\d+(?:\.\d+)?)%",
+                headline_lower,
+            )
+            if bellwether_growth:
+                bw_pct = float(bellwether_growth.group(1))
+                if bw_pct < 15.0:
+                    penalties["largecap_modest_growth"] = -14.0
+
+        # Management caution / concall headwind signals
+        cautious_tone_patterns = [
+            r"\bcautious\s+(?:on|about|outlook|management)",
+            r"\bmanagement\s+(?:cautious|warns?|sees?\s+challenges?)",
+            r"\bchallenging\s+(?:quarter|environment|outlook|macro)",
+            r"\bweak\s+(?:demand|pipeline|order\s*book|commentary)",
+            r"\bslower\s+(?:growth|recovery|momentum|deal\s+wins?)",
+            r"\bheadwinds?\b",
+            r"\bmuted\s+(?:outlook|guidance|growth|commentary)",
+            r"\bpressure\s+on\s+(?:margins?|growth|revenue)",
+            r"\bmanagement\s+(?:commentary|tone)\s+(?:negative|weak|cautious|disappointing)",
+            r"\bdisappointing\s+(?:guidance|commentary|outlook|concall)",
+        ]
+        if any(re.search(pat, headline_lower) for pat in cautious_tone_patterns):
+            penalties["management_caution_tone"] = -14.0
+
+        # ── SECTOR MOMENTUM CONTEXT ───────────────────────────────────────
+        try:
+            from app.intelligence.sector_momentum import get_sector_momentum_analyzer
+            momentum_analyzer = get_sector_momentum_analyzer()
+            if event_symbol:
+                sector_mod = momentum_analyzer.get_sector_modifier(event_symbol)
+                if sector_mod < 0:
+                    penalties["sector_headwind"] = sector_mod
+                elif sector_mod > 0 and is_positive:
+                    # Sector tailwind only helps bullish setups
+                    penalties["sector_tailwind"] = sector_mod
+        except Exception:
+            pass  # Sector momentum is optional; continue without it
+
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 
         # 5. Hard minimum-confidence gate — if we can't verify the company, exclude from watchlist
@@ -270,8 +372,8 @@ class ScoringEngine:
         elif cat_str == "BUYBACK" and final_score < 78.0:
             # Routine buybacks without high conviction tend to be sell-on-news
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
-        elif "margin_compression" in penalties or "negative_forward_guidance" in penalties:
-            # Margin erosion or guidance cut invalidates bullish trade thesis
+        elif "margin_compression" in penalties or "negative_forward_guidance" in penalties or "management_caution_tone" in penalties:
+            # Margin erosion, guidance cut, or cautious management tone invalidates bullish trade thesis
             if is_negative or "negative_forward_guidance" in penalties:
                 candidate_class = CandidateClassification.BEARISH if final_score >= 60.0 else CandidateClassification.WATCH_ONLY
             else:
@@ -279,8 +381,8 @@ class ScoringEngine:
         elif "unquantified_order_win" in penalties and final_score < 78.0:
             # Orders without numeric value cannot be modeled by institutions — keep in WATCH_ONLY
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
-        elif "subpar_growth_deceleration" in penalties and final_score < 78.0:
-            # Single-digit profit growth (<8%) triggers sell-the-news
+        elif ("subpar_growth_deceleration" in penalties or "largecap_modest_growth" in penalties or "revenue_profit_divergence" in penalties or "exceptional_items_inflation" in penalties) and final_score < 78.0:
+            # Growth deceleration, bellwether modest growth, or accounting quality issues → WATCH_ONLY
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
         elif is_negative:
             if final_score >= 78.0:

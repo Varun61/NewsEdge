@@ -238,3 +238,116 @@ def test_quarterly_results_priced_in_if_before_330pm_or_retrospective():
     )
     analysis_retro = StockAnalysis(news_event=ev_retro)
     assert _is_priced_in(analysis_retro, as_of_dt=ref_dt) is True
+
+
+def test_earnings_quality_gate_penalties(session):
+    from app.config import Settings
+    from app.intelligence.ai_provider import ClassificationResult
+    from app.intelligence.scoring_engine import ScoringEngine
+
+    engine = ScoringEngine(Settings())
+
+    # 1. Bellwether modest growth (<15% profit growth for HDFC Bank)
+    c_hdfc = Company(nse_symbol="HDFCBANK", company_name="HDFC Bank Limited", is_active=True, annual_revenue=200000.0)
+    session.add(c_hdfc)
+    session.flush()
+
+    ev_bw = NewsEvent(
+        primary_headline="HDFC Bank Q2 profit rises 5.3% to ₹16,821 crore",
+        event_hash="hash_bw",
+        primary_company_id=c_hdfc.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    session.add(ev_bw)
+    session.flush()
+
+    cls_bw = ClassificationResult(
+        company_name="HDFC Bank Limited",
+        nse_symbol="HDFCBANK",
+        news_category="PROFIT_GROWTH",
+        sentiment="POSITIVE",
+        impact_score=75.0,
+        confidence=85.0,
+        expected_direction="bullish",
+    )
+    res_bw = engine.score_event(ev_bw, cls_bw, 75.0, session)
+    assert res_bw is not None
+    assert "largecap_modest_growth" in res_bw.penalties
+    assert res_bw.classification in (CandidateClassification.WATCH_ONLY, CandidateClassification.EXCLUDED)
+
+    # 2. Exceptional / one-off items inflating profit
+    c_bajaj = Company(nse_symbol="BAJAJCON", company_name="Bajaj Consumer Care", is_active=True, annual_revenue=1000.0)
+    session.add(c_bajaj)
+    session.flush()
+
+    ev_exc = NewsEvent(
+        primary_headline="Bajaj Consumer Q2 profit jumps 66% aided by exceptional gain of ₹45 crore",
+        event_hash="hash_exc",
+        primary_company_id=c_bajaj.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    session.add(ev_exc)
+    session.flush()
+
+    cls_exc = ClassificationResult(
+        company_name="Bajaj Consumer Care",
+        nse_symbol="BAJAJCON",
+        news_category="PROFIT_GROWTH",
+        sentiment="VERY_POSITIVE",
+        impact_score=80.0,
+        confidence=80.0,
+        expected_direction="bullish",
+    )
+    res_exc = engine.score_event(ev_exc, cls_exc, 80.0, session)
+    assert res_exc is not None
+    assert "exceptional_items_inflation" in res_exc.penalties
+
+    # 3. Management caution tone in commentary
+    c_ltm = Company(nse_symbol="LTIM", company_name="LTIMindtree Limited", is_active=True, annual_revenue=35000.0)
+    session.add(c_ltm)
+    session.flush()
+
+    ev_cautious = NewsEvent(
+        primary_headline="LTIMindtree Q2 profit up 8%; management cautious on discretionary tech spending",
+        event_hash="hash_ltm",
+        primary_company_id=c_ltm.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    session.add(ev_cautious)
+    session.flush()
+
+    cls_cautious = ClassificationResult(
+        company_name="LTIMindtree Limited",
+        nse_symbol="LTIM",
+        news_category="PROFIT_GROWTH",
+        sentiment="NEUTRAL",
+        impact_score=68.0,
+        confidence=80.0,
+        expected_direction="bullish",
+    )
+    res_cautious = engine.score_event(ev_cautious, cls_cautious, 68.0, session)
+    assert res_cautious is not None
+    assert "management_caution_tone" in res_cautious.penalties
+    assert res_cautious.classification in (CandidateClassification.WATCH_ONLY, CandidateClassification.EXCLUDED)
+
+
+def test_telegram_conviction_tier_badges():
+    from app.reporting.telegram_formatter import TelegramFormatter
+    assert TelegramFormatter._conviction_tier(88.0) == "🎯 "
+    assert TelegramFormatter._conviction_tier(75.0) == "⚡ "
+    assert TelegramFormatter._conviction_tier(66.0) == "👀 "
+    assert TelegramFormatter._conviction_tier(50.0) == ""
+
+
+def test_sector_momentum_analyzer_mapping():
+    from app.intelligence.sector_momentum import get_sector_momentum_analyzer, STOCK_SECTOR_MAP
+    analyzer = get_sector_momentum_analyzer()
+    assert STOCK_SECTOR_MAP["HDFCBANK"] == "BANKING"
+    assert STOCK_SECTOR_MAP["INFY"] == "IT"
+    assert STOCK_SECTOR_MAP["SUNPHARMA"] == "PHARMA"
+    assert STOCK_SECTOR_MAP["MARUTI"] == "AUTO"
+    assert STOCK_SECTOR_MAP["JSWSTEEL"] == "METALS"
+    # When cache is empty/mocked, returns 0.0 without errors
+    mod = analyzer.get_sector_modifier("HDFCBANK")
+    assert isinstance(mod, float)
+

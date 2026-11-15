@@ -197,6 +197,8 @@ class TelegramFormatter:
         else:
             for idx, item in enumerate(top_fresh_bullish, 1):
                 lines.extend(cls._format_candidate_card(item, idx, is_bullish=True))
+            lines.append("🎯 = Strong Conviction  ⚡ = Moderate  👀 = Tracking")
+            lines.append("")
             lines.append("⚡ <i>Execution Tip: If a stock gaps up > 3% at open, avoid chasing market orders. Allow 15-min consolidation.</i>")
         for chunk in cls._chunk_text("\n".join(lines).strip()):
             messages.append(chunk)
@@ -318,6 +320,19 @@ class TelegramFormatter:
         ]
 
     @classmethod
+    def _conviction_tier(cls, score: Optional[float]) -> str:
+        """Return a conviction tier emoji based on analysis score."""
+        if score is None:
+            return ""
+        if score >= 85:
+            return "🎯 "
+        if score >= 70:
+            return "⚡ "
+        if score >= 64:
+            return "👀 "
+        return ""
+
+    @classmethod
     def _format_candidate_card(
         cls, analysis: StockAnalysis, rank: int, is_bullish: bool = True
     ) -> List[str]:
@@ -340,8 +355,10 @@ class TelegramFormatter:
 
         link_html = f' • <a href="{_esc(url)}">LINK</a>' if url else ""
 
+        tier = cls._conviction_tier(analysis.overall_score)
+
         card = [
-            f"{rank}. <code>{_esc(symbol)}</code> • <b>{_esc(comp_name)}</b>",
+            f"{rank}. {tier}<code>{_esc(symbol)}</code> • <b>{_esc(comp_name)}</b>",
             f"   {_esc(concise_news)}{link_html}",
             "",
         ]
