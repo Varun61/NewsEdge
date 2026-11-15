@@ -132,3 +132,65 @@ def test_brokerage_radar_collector_init():
     assert collector.source_name == "Brokerage Radar"
     assert collector.enabled is True
     assert collector.credibility_score >= 0.85
+
+
+def test_trade_playbook_levels():
+    from app.intelligence.trade_playbook import TradePlaybookCalculator
+    # Bullish playbook for stock at ₹3,500 (ATR = 77)
+    pb_bull = TradePlaybookCalculator.calculate_playbook("LT", 3500.0, "BULLISH")
+    assert pb_bull.direction == "BULLISH"
+    assert pb_bull.stop_loss < 3500.0
+    assert pb_bull.target_1 > 3500.0
+    assert pb_bull.target_2 > pb_bull.target_1
+    assert "Entry:" in pb_bull.summary_text
+    assert "SL:" in pb_bull.summary_text
+
+    # Bearish playbook for stock at ₹1,000
+    pb_bear = TradePlaybookCalculator.calculate_playbook("INFY", 1000.0, "BEARISH")
+    assert pb_bear.direction == "BEARISH"
+    assert pb_bear.stop_loss > 1000.0
+    assert pb_bear.target_1 < 1000.0
+    assert pb_bear.target_2 < pb_bear.target_1
+    assert "Short:" in pb_bear.summary_text
+
+
+def test_bulk_deals_marquee_buyer_and_promoter_selling():
+    from app.intelligence.bulk_deals_analyzer import get_bulk_deals_analyzer
+    analyzer = get_bulk_deals_analyzer()
+
+    # 1. Marquee institutional buyer (GQG Partners buys)
+    headline_buy = "GQG Partners buys 1.2 crore shares of GMR Airports in block deal"
+    eval_buy = analyzer.evaluate_deal(headline_buy)
+    assert eval_buy.is_institutional_buying is True
+    assert eval_buy.score_modifier == +12.0
+    assert "Marquee Institutional Accumulation" in eval_buy.advisory
+
+    # 2. Promoter stake sale (Supply Overhang)
+    headline_sell = "Promoter sells 3.5% stake in Amber Enterprises via block deal at discount"
+    eval_sell = analyzer.evaluate_deal(headline_sell)
+    assert eval_sell.is_promoter_selling is True
+    assert eval_sell.score_modifier == -20.0
+    assert "Supply Overhang" in eval_sell.advisory
+
+
+def test_shareholding_pledge_risk_and_fii_inflows():
+    from app.intelligence.shareholding_analyzer import get_shareholding_analyzer
+    analyzer = get_shareholding_analyzer()
+
+    # 1. High pledge stock from benchmark list (ZEEL 45% pledge)
+    eval_zeel = analyzer.evaluate_health("ZEEL")
+    assert eval_zeel.is_high_pledge is True
+    assert eval_zeel.score_modifier <= -18.0
+    assert "Pledge" in eval_zeel.advisory
+
+    # 2. Promoter pledge disclosure in text
+    eval_pledge_txt = analyzer.evaluate_health("XYZ", "Corporate governance update: promoter pledge rises to 35% of holding")
+    assert eval_pledge_txt.is_high_pledge is True
+    assert eval_pledge_txt.score_modifier <= -18.0
+
+    # 3. Institutional inflows (FII raises stake)
+    eval_fii = analyzer.evaluate_health("RELIANCE", "Q2 shareholding pattern: FII raises stake by 2.4%")
+    assert eval_fii.is_institutional_inflow is True
+    assert eval_fii.score_modifier == +8.0
+    assert "Institutional Inflows" in eval_fii.advisory
+

@@ -559,6 +559,22 @@ def run_pipeline_for_day(
         elif concall_eval.score_modifier > 0 and cls_res.expected_direction == "bullish":
             penalties += concall_eval.score_modifier
 
+        # Bulk & Block Deals Analysis
+        from app.intelligence.bulk_deals_analyzer import get_bulk_deals_analyzer
+        deal_eval = get_bulk_deals_analyzer().evaluate_deal(hl, summary)
+        if deal_eval.is_promoter_selling:
+            penalties += deal_eval.score_modifier
+        elif deal_eval.is_institutional_buying and cls_res.expected_direction == "bullish":
+            penalties += deal_eval.score_modifier
+
+        # Shareholding & Pledge Risk Analysis
+        from app.intelligence.shareholding_analyzer import get_shareholding_analyzer
+        share_eval = get_shareholding_analyzer().evaluate_health(sym, f"{hl} {summary}")
+        if share_eval.is_high_pledge or share_eval.is_promoter_selling:
+            penalties += share_eval.score_modifier
+        elif share_eval.is_institutional_inflow and cls_res.expected_direction == "bullish":
+            penalties += share_eval.score_modifier
+
         final_score = max(0.0, min(100.0, raw_score + penalties))
 
         # Hard minimum confidence gate
@@ -574,6 +590,12 @@ def run_pipeline_for_day(
             continue
         if is_margin_compression or is_subpar_growth or is_caution_tone:
             # Margin compression, sub-par growth, or caution tone invalidates bullish trade thesis
+            continue
+        if deal_eval.is_promoter_selling and cls_res.expected_direction == "bullish":
+            # Promoter or PE stake dump invalidates bullish trade thesis
+            continue
+        if share_eval.is_high_pledge and cls_res.expected_direction == "bullish" and final_score < 82.0:
+            # High pledge risk gates stock out of bullish watchlist
             continue
         if (is_largecap_modest_growth or is_rev_profit_divergence or is_exceptional_gain) and final_score < 78.0:
             continue

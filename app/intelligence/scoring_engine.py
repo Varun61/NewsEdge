@@ -362,6 +362,35 @@ class ScoringEngine:
         except Exception:
             pass
 
+        # ── BULK & BLOCK DEALS CORRELATION ────────────────────────────────
+        try:
+            from app.intelligence.bulk_deals_analyzer import get_bulk_deals_analyzer
+            bulk_analyzer = get_bulk_deals_analyzer()
+            full_b_text = f"{event.primary_headline} {event.news_summary or ''}"
+            deal_eval = bulk_analyzer.evaluate_deal(event.primary_headline, full_b_text)
+            if deal_eval.is_promoter_selling:
+                penalties["bulk_deals_promoter_dump"] = deal_eval.score_modifier
+            elif deal_eval.is_institutional_buying and is_positive:
+                penalties["bulk_deals_marquee_buyer"] = deal_eval.score_modifier
+        except Exception:
+            pass
+
+        # ── PROMOTER PLEDGE & SHAREHOLDING HEALTH ─────────────────────────
+        try:
+            from app.intelligence.shareholding_analyzer import get_shareholding_analyzer
+            share_analyzer = get_shareholding_analyzer()
+            full_s_text = f"{event.primary_headline} {event.news_summary or ''}"
+            if event_symbol:
+                share_eval = share_analyzer.evaluate_health(event_symbol, full_s_text)
+                if share_eval.is_high_pledge:
+                    penalties["high_promoter_pledge"] = share_eval.score_modifier
+                elif share_eval.is_promoter_selling:
+                    penalties["promoter_stake_dilution"] = share_eval.score_modifier
+                elif share_eval.is_institutional_inflow and is_positive:
+                    penalties["institutional_stake_inflow"] = share_eval.score_modifier
+        except Exception:
+            pass
+
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 
         # 5. Hard minimum-confidence gate — if we can't verify the company, exclude from watchlist
@@ -413,6 +442,12 @@ class ScoringEngine:
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
         elif "technical_counter_trend" in penalties and is_positive and final_score < 80.0:
             # Stock is in structural downtrend (Price < 20 EMA and 50 EMA) - avoid counter-trend trap
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif "bulk_deals_promoter_dump" in penalties:
+            # Promoter or PE stake offload creates massive supply overhang
+            candidate_class = CandidateClassification.BEARISH if final_score >= 60.0 else CandidateClassification.WATCH_ONLY
+        elif "high_promoter_pledge" in penalties and is_positive and final_score < 82.0:
+            # Toxic pledge risk gates stock out of bullish actionable recommendations
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
         elif is_negative:
             if final_score >= 78.0:

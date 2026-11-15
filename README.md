@@ -6,7 +6,7 @@
 [![AI Provider](https://img.shields.io/badge/AI-Ollama%20(llama3.2)%20%7C%20OpenAI-purple.svg)](https://ollama.ai)
 [![Telegram](https://img.shields.io/badge/Delivery-Telegram%204--Category-0088cc.svg)](https://telegram.org)
 [![Broker](https://img.shields.io/badge/Broker-Groww%20Sync-00d09c.svg)](https://groww.in)
-[![Tests](https://img.shields.io/badge/Tests-44%20Passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-47%20Passing-brightgreen.svg)](tests/)
 
 **NewsEdge** is an automated, institutional-grade equity intelligence pipeline built specifically for Indian stock market (NSE/BSE) traders and research analysts.
 
@@ -58,6 +58,24 @@ Every stock card in Telegram is badged with an institutional conviction indicato
 - **Sunday or Monday Morning**: Automatically expands lookback to capture everything from **Friday 3:30 PM IST to current run time**, ensuring no weekend earnings announcements or corporate actions are missed.
 - **Monday Post-Market (after 3:30 PM IST)**: Automatically switches back to the standard weekday 24-hour post-market lookback.
 - **Direct Clickable Source Links (`LINK`)**: Every stock card includes a direct `<a href="...">LINK</a>` to the original news article, exchange filing PDF, concall transcript, or Tijori analysis.
+
+### 6. Automated Intraday Trade Playbook
+Every candidate card in Telegram features mathematically calculated, volatility-adjusted execution parameters based on 14-day ATR (Average True Range):
+- 📍 **Entry Zone**: Optimum price window for order placement
+- 🛑 **Stop-Loss (SL)**: $1.2 \times \text{ATR}$
+- 🎯 **Target 1**: $1.2 \times \text{ATR}$ (Conservative 1:1 Risk-Reward)
+- 🎯 **Target 2**: $2.4 \times \text{ATR}$ (Expansion 1:2 Risk-Reward)
+
+### 7. NSE Bulk & Block Deals Correlator
+Cross-references every candidate stock with daily bulk/block deal disclosures:
+- 🐋 **Smart Money Accumulation (+12 score boost)**: When marquee funds (GQG Partners, Vanguard, Capital Group, SBI MF, Mukul Agrawal, Ashish Kacholia) buy.
+- 🐋 **Supply Overhang Warning (-20 penalty)**: When promoters or Private Equity funds (Blackstone, Warburg Pincus, Softbank) dump stakes via discounted block deals.
+
+### 8. Promoter Shareholding & Pledge Health Check
+Eliminates toxic, highly leveraged balance sheets that dump on good earnings news:
+- ⚠️ **High Pledge Alert (-18 to -25 penalty)**: Flags stocks where promoters have pledged $>20\%$ or $>40\%$ of their holdings to lenders.
+- ⚠️ **Promoter Stake Dilution (-14 penalty)**: Detects consecutive quarter-over-quarter promoter stake reductions.
+- 🏛️ **Institutional Inflow (+8 boost)**: Confirms FII/DII expansion in the latest quarter.
 
 ---
 
@@ -133,9 +151,11 @@ Fresh post-market catalysts for next trading day
 
 1. 🎯 LT • Larsen & Toubro Limited
    L&T bags mega ₹4,000 crore hydrocarbon order in Middle East • LINK
+   📍 Entry: ₹3,510–₹3,535 | SL: ₹3,475 (-1.4%) | T1: ₹3,570 (+1.4%) | T2: ₹3,620 (+2.8%)
 
 2. ⚡ ASHOKLEY • Ashok Leyland Limited
    Operating profit jumps 16.4% YoY to ₹2,805 Cr, sales rises 35.4% • LINK
+   📍 Entry: ₹220–₹223 | SL: ₹215 (-2.3%) | T1: ₹227 (+2.3%) | T2: ₹232 (+4.5%)
 
 🎯 = Strong Conviction  ⚡ = Moderate  👀 = Tracking
 
@@ -307,7 +327,10 @@ NewsEdge/
 │   │   └── official_collectors/ # Official NSE Announcements API
 │   ├── database/                # SQLAlchemy models, SQLite repository, schema
 │   ├── integrations/            # Groww automated TOTP login & watchlist sync
-│   ├── intelligence/            # 5 Alpha Layers: Trend, Gap, Concall, Derivatives, Scoring
+│   ├── intelligence/            # 8 Alpha Layers: Playbook, Bulk Deals, Pledge, Trend, Gap, Concall, Derivatives
+│   │   ├── trade_playbook.py    # Volatility ATR-adjusted Entry, SL, T1, T2 levels
+│   │   ├── bulk_deals_analyzer.py # Smart money vs promoter/PE block deal liquidations
+│   │   ├── shareholding_analyzer.py # Promoter pledge (>20%) and ownership health checks
 │   │   ├── technical_trend.py   # 20/50 EMA structural trend analyzer
 │   │   ├── gap_analyzer.py      # Pre-market opening gap & exhaustion evaluator
 │   │   ├── concall_analyzer.py  # Concall transcript & guidance extractor

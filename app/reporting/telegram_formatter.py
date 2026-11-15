@@ -361,8 +361,29 @@ class TelegramFormatter:
             f"{rank}. {tier}<code>{_esc(symbol)}</code> • <b>{_esc(comp_name)}</b>",
             f"   {_esc(concise_news)}{link_html}",
         ]
-        if analysis.penalties and "technical_counter_trend" in analysis.penalties:
-            card.append("   ⚠️ <i>Counter-trend bounce: stock is below 20/50 EMA.</i>")
+
+        # Trade Playbook Execution Levels (Entry, SL, T1, T2)
+        try:
+            from app.intelligence.trade_playbook import TradePlaybookCalculator
+            from app.intelligence.technical_trend import get_technical_trend_analyzer
+            trend_eval = get_technical_trend_analyzer().get_trend_evaluation(symbol) if symbol and symbol != "UNKNOWN" else None
+            ref_px = trend_eval.current_price if trend_eval else None
+            if ref_px and ref_px > 0:
+                dir_str = "BULLISH" if is_bullish else "BEARISH"
+                playbook = TradePlaybookCalculator.calculate_playbook(symbol, ref_px, dir_str)
+                card.append(f"   📍 <code>{_esc(playbook.summary_text)}</code>")
+        except Exception:
+            pass
+
+        if analysis.penalties:
+            if "technical_counter_trend" in analysis.penalties:
+                card.append("   ⚠️ <i>Counter-trend bounce: stock is below 20/50 EMA.</i>")
+            if "high_promoter_pledge" in analysis.penalties:
+                card.append("   ⚠️ <i>High promoter pledge risk (>20%). Watch for lender selling.</i>")
+            if "bulk_deals_promoter_dump" in analysis.penalties:
+                card.append("   🐋 <i>Supply Overhang: Large block deal stake sale by promoters/PE.</i>")
+            if "bulk_deals_marquee_buyer" in analysis.penalties:
+                card.append("   🐋 <i>Smart Money: Marquee institutional fund buying via block deal.</i>")
 
         card.append("")
         return card
