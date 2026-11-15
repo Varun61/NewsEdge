@@ -406,14 +406,33 @@ def run_pipeline_for_day(
         if cat_str == "BUYBACK":
             penalties -= 8.0
 
+        # Tiny absolute profit filter
+        tiny_profit_match = re.search(r"profit.*?(?:rs\.?|inr|₹)\s*(\d+(?:\.\d+)?)\s*(?:crore|cr)\b", hl_lower)
+        if tiny_profit_match:
+            abs_profit_cr = float(tiny_profit_match.group(1))
+            if abs_profit_cr < 5.0:
+                penalties -= 15.0
+
+        # Speculative / forecast penalty
+        speculative_patterns = [
+            r"\binterview\b", r"\bcould\s+rally\b", r"\bmay\s+(?:rally|surge|jump)\b",
+            r"\bsees?\s+\d+%\s+upside\b", r"\bexpects?\b.*\bgrowth\b"
+        ]
+        if any(re.search(pat, hl_lower) for pat in speculative_patterns):
+            penalties -= 10.0
+
         final_score = max(0.0, min(100.0, raw_score + penalties))
 
         # Hard minimum confidence gate
         if cls_res.confidence < 52.0 and final_score < 72.0:
             continue
 
-        # Exclude routine business commentary
+        # Exclude routine business commentary, uncommissioned capex, and weak buybacks
         if cat_str in ("BUSINESS_UPDATE", "OTHER"):
+            continue
+        if cat_str == "CAPACITY_EXPANSION" and not any(kw in hl_lower for kw in ["bags order", "wins contract", "commissions", "inaugurates"]):
+            continue
+        if cat_str == "BUYBACK" and final_score < 78.0:
             continue
 
         # Classification tier assignment (tighter thresholds for actionable tiers)
@@ -738,6 +757,16 @@ def run_month_backtest(start_date: date, end_date: date):
 
 
 if __name__ == "__main__":
-    start = date(2026, 10, 1)
+    import argparse
+    parser = argparse.ArgumentParser(description="NewsEdge Historical Backtester")
+    parser.add_argument("--weeks", type=int, default=3, help="Number of weeks to backtest (default: 3)")
+    parser.add_argument("--full", action="store_true", help="Run full 1-month backtest (Oct 1 to Nov 3)")
+    args = parser.parse_args()
+
     end = date(2026, 11, 3)
+    if args.full:
+        start = date(2026, 10, 1)
+    else:
+        start = end - timedelta(weeks=args.weeks)
+
     run_month_backtest(start, end)

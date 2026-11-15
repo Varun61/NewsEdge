@@ -123,15 +123,15 @@ def get_effective_collection_window(
 ) -> Tuple[datetime, datetime, str]:
     """Calculate the collection window dynamically.
 
-    1. If `lookback_hours` is explicitly provided:
-       Uses [now - lookback_hours, now].
-    2. If run on a non-trading day (Saturday/Sunday/Holiday) in ad-hoc mode:
-       Uses the last 24 hours (or since Friday 15:30 IST).
-    3. If run on a Monday (or day following holiday):
-       Uses previous trading day (Friday) 15:30 IST to Monday cutoff (or current time if ad-hoc),
-       naturally including all news published on Saturday and Sunday!
-    4. Otherwise (standard Tuesday-Friday trading day):
-       Uses previous trading day 15:30 IST to today 07:59 IST (or current time if ad-hoc).
+    Default behavior for evening/night runs:
+    - Collect from TODAY's 15:30 IST to NOW.
+    - This captures all fresh post-market-close news.
+
+    For morning runs (before market open):
+    - Collect from previous trading day's 15:30 IST to NOW.
+
+    For cron scheduled runs:
+    - Uses previous trading day 15:30 IST to today's end_hour:end_minute IST.
 
     Returns:
         (start_utc, end_utc, window_description)
@@ -150,7 +150,7 @@ def get_effective_collection_window(
         )
         return start_utc, end_utc, desc
 
-    # Case 2: Run now on a weekend or trading holiday (Ad-hoc)
+    # Case 2: Run on a weekend or trading holiday (Ad-hoc)
     if not is_trading_day(target_date) and (is_adhoc or report_date is None):
         end_utc = now_utc()
         start_utc = end_utc - timedelta(hours=24)
@@ -161,21 +161,42 @@ def get_effective_collection_window(
         )
         return start_utc, end_utc, desc
 
-    # Case 3: Standard trading day (Monday or after holiday)
+    # Case 3: Ad-hoc run on a trading day (e.g. evening run collecting from 3:30 PM to now)
+    if is_adhoc or report_date is None:
+        end_utc = now_utc()
+        end_ist = current_ist
+
+        today_close = IST.localize(datetime.combine(target_date, time(start_hour, start_minute)))
+
+        if current_ist >= today_close and is_trading_day(target_date):
+            # Evening/night run on trading day: collect from today's 3:30 PM to now
+            start_ist = today_close
+            desc = (
+                f"Post-market window: Today {start_ist.strftime('%H:%M')} to "
+                f"{end_ist.strftime('%H:%M')} IST"
+            )
+        else:
+            # Morning run: collect from previous trading day's 3:30 PM to now
+            prev_day = previous_trading_day(target_date)
+            start_ist = IST.localize(datetime.combine(prev_day, time(start_hour, start_minute)))
+            desc = (
+                f"Overnight window: {prev_day.strftime('%d-%b')} {start_ist.strftime('%H:%M')} to "
+                f"{end_ist.strftime('%H:%M')} IST"
+            )
+
+        start_utc = start_ist.astimezone(timezone.utc)
+        return start_utc, end_utc, desc
+
+    # Case 4: Scheduled cron run (standard trading day)
     prev_day = previous_trading_day(target_date)
     start_ist = IST.localize(datetime.combine(prev_day, time(start_hour, start_minute)))
 
-    # Determine end time: if ad-hoc and current time on target day is past 07:59, include up to now
     scheduled_end = IST.localize(datetime.combine(target_date, time(end_hour, end_minute)))
-    if is_adhoc and current_ist.date() == target_date and current_ist > scheduled_end:
-        end_ist = current_ist
-    else:
-        end_ist = scheduled_end
+    end_ist = scheduled_end
 
     start_utc = start_ist.astimezone(timezone.utc)
     end_utc = end_ist.astimezone(timezone.utc)
 
-    # Note if this window covers the weekend (e.g. Friday -> Monday)
     days_span = (target_date - prev_day).days
     if days_span > 1:
         desc = (

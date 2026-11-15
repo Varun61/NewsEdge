@@ -335,6 +335,38 @@ class NSEStockResolver:
                 logger.info("Filtered false match: Anil Ambani Group / ADAG event detected, excluding from RIL (RELIANCE)")
                 return None
 
+        # 2. Broker/subsidiary vs parent bank confusion
+        # "ICICI Securities" / "ICICI Sec" / "ICICI Direct" research notes should not map to ICICIBANK
+        if sym == "ICICIBANK":
+            if any(term in norm_headline for term in ["icici sec", "icici direct", "icici securities", "icici prudential", "icici lombard"]):
+                for sub_sym in ["ISEC", "ICICIGI", "ICICIPRULI"]:
+                    if sub_sym in self._symbol_map:
+                        sub_term = sub_sym.lower()
+                        if any(t in norm_headline for t in [f"{sub_term}", "icici sec" if sub_sym == "ISEC" else sub_sym.lower()]):
+                            return {**self._symbol_map[sub_sym], "confidence": 90.0, "match_source": f"subsidiary_disambiguation:{sub_sym}"}
+                if any(term in norm_headline for term in ["downgrades", "downgraded", "initiates", "maintains", "upgrades", "target price", "tp of"]):
+                    logger.debug("Filtered broker research note mapped to parent bank: %s", norm_headline[:60])
+                    return None
+
+        # 3. Kotak doing PE/VC investments — not relevant to KOTAKBANK equity
+        if sym == "KOTAKBANK":
+            if any(term in norm_headline for term in ["kotak alts", "kotak alternatives", "kotak private equity", "kotak pe", "kotak infra", "invests in", "pumps", "backs"]):
+                if not any(term in norm_headline for term in ["kotak bank", "kotak mahindra bank", "kotakbank"]):
+                    logger.debug("Filtered PE/VC investment by Kotak subsidiary, not KOTAKBANK: %s", norm_headline[:60])
+                    return None
+
+        # 4. "take over" phrase should not match TAKE Solutions
+        if sym == "TAKE":
+            if any(phrase in norm_headline for phrase in ["take over", "takes over", "took over", "takeover", "to take"]):
+                logger.debug("Filtered 'take over' phrase falsely matching TAKE Solutions")
+                return None
+
+        # 5. Trident Hotels vs Trident textiles
+        if sym == "TRIDENT":
+            if any(term in norm_headline for term in ["trident hotel", "eih", "oberoi"]):
+                logger.debug("Filtered Trident Hotel news from Trident textiles")
+                return None
+
         return info
 
     def resolve_from_text(self, headline: str, body_text: str = "") -> Optional[dict]:
@@ -347,6 +379,17 @@ class NSEStockResolver:
         combined = f"{cleaned_hl} {body_text[:500]}"
         norm_headline = self.normalize_text(cleaned_hl)
         norm_combined = self.normalize_text(combined)
+
+        # Block generic roundup/listicle headlines from matching — they mention multiple stocks
+        _ROUNDUP_HEADLINE_PATTERNS = [
+            r"^buzzing\s+stock", r"^stocks?\s+(?:in\s+focus|to\s+watch|to\s+buy)",
+            r"^\d+\s+(?:stocks?|shares?)\s+(?:to|that)", r"^top\s+\d+\s+stock",
+            r"face-off.*which.*(?:to\s+buy|better)", r"^(?:hot|trending)\s+stock",
+            r"^(?:best|top)\s+(?:mid|small|large|multi)\s*-?\s*cap\s+stock",
+        ]
+        if any(re.search(pat, norm_headline) for pat in _ROUNDUP_HEADLINE_PATTERNS):
+            logger.debug("Blocked roundup/listicle headline from entity resolution: %s", cleaned_hl[:60])
+            return None
 
         # 1. Check for explicit ticker mentions like "(NSE: LT)", "NSE: GAIL"
         ticker_match = re.search(r"\b(?:NSE|BSE)\s*:\s*([A-Z0-9\-]+)\b", cleaned_hl.upper())

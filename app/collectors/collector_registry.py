@@ -13,8 +13,13 @@ from app.collectors.news_collectors.financial_express import FinancialExpressCol
 from app.collectors.news_collectors.google_news import GoogleNewsCollector
 from app.collectors.news_collectors.hindu_businessline import HinduBusinessLineCollector
 from app.collectors.news_collectors.investing_com import InvestingComCollector
+from app.collectors.news_collectors.marketbyte import MarketByteCollector
 from app.collectors.news_collectors.mint_news import MintCollector
 from app.collectors.news_collectors.moneycontrol import MoneycontrolCollector
+from app.collectors.news_collectors.moneycontrol_results import MoneycontrolResultsCollector
+from app.collectors.news_collectors.screener_collector import ScreenerCollector
+from app.collectors.news_collectors.thecore_earnings import TheCoreEarningsCollector
+from app.collectors.news_collectors.tijori_finance import TijoriFinanceCollector
 from app.collectors.news_collectors.zerodha_pulse import ZerodhaPulseCollector
 from app.collectors.official_collectors.bse_announcements import BSEAnnouncementCollector
 from app.collectors.official_collectors.nse_announcements import NSEAnnouncementCollector
@@ -58,8 +63,15 @@ def build_default_registry() -> CollectorRegistry:
     registry.register(ZerodhaPulseCollector(enabled=True))
     registry.register(InvestingComCollector(enabled=True))
 
-    # Official exchange announcements (disabled by default until licensed credentials provided)
-    registry.register(NSEAnnouncementCollector(enabled=False))
+    # High-precision earnings, concall, and financial results sources
+    registry.register(TijoriFinanceCollector(enabled=True))
+    registry.register(MarketByteCollector(enabled=True))
+    registry.register(MoneycontrolResultsCollector(enabled=True))
+    registry.register(TheCoreEarningsCollector(enabled=True))
+    registry.register(ScreenerCollector(enabled=True))
+
+    # Official exchange announcements
+    registry.register(NSEAnnouncementCollector(enabled=True))
     registry.register(BSEAnnouncementCollector(enabled=False))
 
     return registry

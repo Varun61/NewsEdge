@@ -151,6 +151,9 @@ class ScoringEngine:
 
         # 4. Apply penalties
         penalties: Dict[str, float] = {}
+        import re
+        headline_lower = (event.primary_headline or "").lower()
+
         if freshness_score <= 30.0:
             penalties["stale_news_gap_exhaustion"] = -10.0
         if confirmation_score <= 50.0 and credibility_score < 70.0:
@@ -167,8 +170,6 @@ class ScoringEngine:
         if cat_str == "BUYBACK":
             penalties["buyback_sell_on_news"] = -8.0
         # Backward-looking past price action report (exhausted momentum)
-        import re
-        headline_lower = event.primary_headline.lower()
         past_surge_patterns = [
             r"\b(?:shares|stock)\b.*\b(?:surge\w*|skyrocket\w*|rally\w*|rallied|jump\w*|jumped|gain\w*|gained|soar\w*)\b.*\b(?:\d+%\b|\d+\s*percent)",
             r"\b(?:rallies|surges|jumps|zooms|skyrockets)\b\s+(?:whopping\s+)?(?:\d+%\b|\d+\s*percent)",
@@ -178,6 +179,21 @@ class ScoringEngine:
         is_past_price_report = any(bool(re.search(pat, headline_lower)) for pat in past_surge_patterns)
         if is_past_price_report and not any(kw in headline_lower for kw in ["bags order", "wins contract", "secures order", "awarded"]):
             penalties["past_price_action_exhaustion"] = -12.0
+
+        # Tiny absolute profit filter: if headline mentions profit in single-digit crores, it's immaterial for mid/large caps
+        tiny_profit_match = re.search(r"profit.*?(?:rs\.?|inr|₹)\s*(\d+(?:\.\d+)?)\s*(?:crore|cr)\b", headline_lower)
+        if tiny_profit_match:
+            abs_profit_cr = float(tiny_profit_match.group(1))
+            if abs_profit_cr < 5.0:
+                penalties["tiny_absolute_profit"] = -15.0
+
+        # Speculative / interview / forecast headlines — not confirmed events
+        speculative_patterns = [
+            r"\binterview\b", r"\bcould\s+rally\b", r"\bmay\s+(?:rally|surge|jump)\b",
+            r"\bsees?\s+\d+%\s+upside\b", r"\bexpects?\b.*\bgrowth\b"
+        ]
+        if any(re.search(pat, headline_lower) for pat in speculative_patterns):
+            penalties["speculative_forecast"] = -10.0
 
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 
@@ -209,6 +225,12 @@ class ScoringEngine:
         # 6. Determine Classification Priority (tighter thresholds for actionable tiers)
         if cat_str in ("BUSINESS_UPDATE", "OTHER"):
             # Routine commentary and generic updates never qualify for Bullish/Bearish trade watchlists
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif cat_str == "CAPACITY_EXPANSION" and not any(kw in headline_lower for kw in ["bags order", "wins contract", "commissions", "inaugurates"]):
+            # Uncommissioned long-gestation capex lacks next-day velocity — keep as WATCH_ONLY
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif cat_str == "BUYBACK" and final_score < 78.0:
+            # Routine buybacks without high conviction tend to be sell-on-news
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
         elif is_negative:
             if final_score >= 78.0:

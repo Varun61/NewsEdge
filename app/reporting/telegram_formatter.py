@@ -1,18 +1,27 @@
-"""Telegram message formatter matching modern, minimalist fintech standards.
+"""Telegram message formatter with 4-category system for actionable trading intelligence.
 
-Produces clean, aesthetic, and scannable messages for stock traders:
+Categories:
+1. 🟢 BULLISH — Fresh post-market news, actionable for next trading day
+2. 🔴 BEARISH — Fresh post-market news, actionable for next trading day
+3. 📊 PRICED-IN BULLISH — News from during market hours (already reflected in price); momentum play
+4. 📊 PRICED-IN BEARISH — News from during market hours (already reflected in price); momentum play
+
+Produces clean, aesthetic, scannable messages for stock traders:
 - Monospace tap-to-copy NSE ticker (`<code>SYMBOL</code>`)
 - Bold clear company name
 - One concise line of news catalyst
-- Minimal visual noise and no verbose clutter
+- Direct clickable link to news source
 """
 
 from __future__ import annotations
 
 import html
 import logging
-from datetime import date
+import re
+from datetime import date, datetime, time, timezone
 from typing import List, Optional
+
+import pytz
 
 from sqlalchemy.orm import Session
 
@@ -24,6 +33,9 @@ from app.database.models import (
 from app.processors.nse_master import clean_headline_publisher
 
 logger = logging.getLogger("newsedge.reporting.formatter")
+
+IST = pytz.timezone("Asia/Kolkata")
+MARKET_CLOSE_TIME = time(15, 30)  # 3:30 PM IST
 
 
 def _esc(text: str) -> str:
@@ -40,7 +52,8 @@ def _format_concise_headline(headline: str, max_chars: int = 75) -> str:
         "Earnings call transcript:", "Transcript:", "Live:", "Alert:",
         "Watch:", "Stock in focus:", "Stocks in focus:", "Stocks to watch:",
         "Buzzing stock:", "Buzzing stocks:", "Q2 results:", "Q3 results:",
-        "Q4 results:", "Q1 results:", "Exclusive:",
+        "Q4 results:", "Q1 results:", "Exclusive:", "Q2 results impact:",
+        "Q3 results impact:", "Q1 results impact:", "Q4 results impact:",
     ):
         if clean.lower().startswith(prefix.lower()):
             clean = clean[len(prefix):].strip()
@@ -51,8 +64,64 @@ def _format_concise_headline(headline: str, max_chars: int = 75) -> str:
     return clean
 
 
+def _is_priced_in(analysis: StockAnalysis) -> bool:
+    """Determine if the news was published during market hours (already priced in).
+    
+    News published between 9:15 AM IST and 3:30 PM IST on a weekday
+    is considered 'priced in' — the market has already reacted.
+    """
+    event = analysis.news_event
+    if not event:
+        return False
+    
+    # Check article publication times
+    pub_times = []
+    if event.article_links:
+        for link in event.article_links:
+            art = getattr(link, "article", None)
+            if art and getattr(art, "published_at", None):
+                pub_times.append(art.published_at)
+    
+    if not pub_times:
+        if event.created_at:
+            pub_times.append(event.created_at)
+        else:
+            return False
+    
+    # Use the earliest publication time
+    earliest = min(pub_times)
+    if earliest.tzinfo is None:
+        earliest = earliest.replace(tzinfo=timezone.utc)
+    
+    earliest_ist = earliest.astimezone(IST)
+    pub_time = earliest_ist.time()
+    pub_weekday = earliest_ist.weekday()
+    
+    # During market hours: 9:15 AM to 3:30 PM IST on weekdays
+    market_open = time(9, 15)
+    market_close = time(15, 30)
+    
+    if pub_weekday < 5 and market_open <= pub_time <= market_close:
+        return True
+    
+    # Also check: headline mentions retrospective price action
+    h_lower = (event.primary_headline or "").lower()
+    retro_patterns = [
+        r"\b(?:shares?|stocks?)\s+(?:surge|rall|jump|gain|climb|soar|rise|zoom)\w*\s+(?:over\s+|nearly\s+|by\s+)?\d+",
+        r"\b(?:shares?|stocks?)\s+(?:gain|rise|hit|extend)\w*\s+(?:after|as|on)\b",
+        r"\bextend\w*\s+(?:\d{4}\s+)?gain",
+        r"\b(?:hits?|at)\s+(?:52-week|record|all-time|year|new|lifetime)\s*-?\s*high",
+        r"\bup\s+\d+.*(?:from\s+(?:52-week\s+)?low|from\s+ipo)",
+        r"\b(?:stock|shares?)\s+(?:up|down)\s+(?:over\s+)?\d+%?\s+today",
+    ]
+    if any(re.search(pat, h_lower) for pat in retro_patterns):
+        return True
+    
+    return False
+
+
 class TelegramFormatter:
-    """Formats DailyWatchlists into modern, clean, scannable Telegram messages (HTML)."""
+    """Formats DailyWatchlists into 4-category Telegram messages (HTML)."""
 
     MAX_MESSAGE_LENGTH = 3900
 
@@ -63,77 +132,109 @@ class TelegramFormatter:
         session: Session,
         window_description: Optional[str] = None,
     ) -> List[str]:
-        """Convert a DailyWatchlist into focused Bullish and Bearish messages."""
+        """Convert a DailyWatchlist into 4-category messages:
+        1. Fresh Bullish, 2. Fresh Bearish, 3. Priced-In Bullish, 4. Priced-In Bearish.
+        """
         date_str = watchlist.report_date.strftime("%d %b")
 
         items = sorted(watchlist.items, key=lambda it: it.rank_position)
         analyses: list[StockAnalysis] = [it.stock_analysis for it in items if it.stock_analysis]
 
-        bullish = [
+        # Separate into bullish and bearish
+        all_bullish = [
             a for a in analyses
             if a.classification in (CandidateClassification.STRONG_BULLISH, CandidateClassification.BULLISH)
         ]
-        bearish = [
+        all_bearish = [
             a for a in analyses
             if a.classification in (CandidateClassification.STRONG_BEARISH, CandidateClassification.BEARISH)
         ]
 
-        # Select Top 10 unique companies for Bullish and Top 10 unique companies for Bearish
-        seen_comps = set()
-        top_bullish = []
-        for a in bullish:
-            if a.company_id and a.company_id not in seen_comps:
-                seen_comps.add(a.company_id)
-                top_bullish.append(a)
-                if len(top_bullish) == 10:
-                    break
+        # Further split into fresh vs priced-in
+        fresh_bullish_raw = [a for a in all_bullish if not _is_priced_in(a)]
+        priced_bullish_raw = [a for a in all_bullish if _is_priced_in(a)]
+        fresh_bearish_raw = [a for a in all_bearish if not _is_priced_in(a)]
+        priced_bearish_raw = [a for a in all_bearish if _is_priced_in(a)]
 
-        top_bearish = []
-        for a in bearish:
-            if a.company_id and a.company_id not in seen_comps:
-                seen_comps.add(a.company_id)
-                top_bearish.append(a)
-                if len(top_bearish) == 10:
-                    break
+        # Deduplicate per company — and prevent same stock in both bullish AND bearish
+        global_seen = set()
+
+        def _dedupe_top(items_list: list[StockAnalysis], max_items: int = 10) -> list[StockAnalysis]:
+            result = []
+            for a in items_list:
+                if a.company_id and a.company_id not in global_seen:
+                    global_seen.add(a.company_id)
+                    result.append(a)
+                    if len(result) == max_items:
+                        break
+            return result
+
+        # Fresh lists first (higher priority), then priced-in
+        top_fresh_bullish = _dedupe_top(fresh_bullish_raw, 10)
+        top_fresh_bearish = _dedupe_top(fresh_bearish_raw, 10)
+        top_priced_bullish = _dedupe_top(priced_bullish_raw, 5)
+        top_priced_bearish = _dedupe_top(priced_bearish_raw, 5)
 
         messages: List[str] = []
 
-        # ── Message 1: Top Bullish Candidates ──────────────────────────
-        lines_bullish = [
+        # ── Message 1: Fresh Bullish ──────────────────────────────
+        lines = [
             f"🟢 <b>BULLISH WATCHLIST</b> • {date_str}",
+            f"<i>Fresh post-market catalysts for next trading day</i>",
             "",
         ]
-
-        if not top_bullish:
-            lines_bullish.append("<i>No high-conviction bullish catalysts found today.</i>")
+        if not top_fresh_bullish:
+            lines.append("<i>No high-conviction bullish catalysts found.</i>")
         else:
-            for idx, item in enumerate(top_bullish, 1):
-                lines_bullish.extend(cls._format_candidate_card(item, idx, is_bullish=True))
-
-        bullish_text = "\n".join(lines_bullish).strip()
-        for chunk in cls._chunk_text(bullish_text):
+            for idx, item in enumerate(top_fresh_bullish, 1):
+                lines.extend(cls._format_candidate_card(item, idx, is_bullish=True))
+        for chunk in cls._chunk_text("\n".join(lines).strip()):
             messages.append(chunk)
 
-        # ── Message 2: Top Bearish Candidates ──────────────────────────
-        lines_bearish = [
+        # ── Message 2: Fresh Bearish ──────────────────────────────
+        lines = [
             f"🔴 <b>BEARISH WATCHLIST</b> • {date_str}",
+            f"<i>Fresh post-market catalysts for next trading day</i>",
             "",
         ]
-
-        if not top_bearish:
-            lines_bearish.append("<i>No high-conviction bearish catalysts found today.</i>")
+        if not top_fresh_bearish:
+            lines.append("<i>No high-conviction bearish catalysts found.</i>")
         else:
-            for idx, item in enumerate(top_bearish, 1):
-                lines_bearish.extend(cls._format_candidate_card(item, idx, is_bullish=False))
+            for idx, item in enumerate(top_fresh_bearish, 1):
+                lines.extend(cls._format_candidate_card(item, idx, is_bullish=False))
+        for chunk in cls._chunk_text("\n".join(lines).strip()):
+            messages.append(chunk)
 
-        # ── Optional: Major Sector Catalysts & News Highlights ─────────
+        # ── Message 3: Priced-In Bullish ──────────────────────────
+        if top_priced_bullish:
+            lines = [
+                f"📊 <b>PRICED-IN BULLISH</b> • {date_str}",
+                f"<i>Market already reacted — consider momentum only</i>",
+                "",
+            ]
+            for idx, item in enumerate(top_priced_bullish, 1):
+                lines.extend(cls._format_candidate_card(item, idx, is_bullish=True))
+            for chunk in cls._chunk_text("\n".join(lines).strip()):
+                messages.append(chunk)
+
+        # ── Message 4: Priced-In Bearish ──────────────────────────
+        if top_priced_bearish:
+            lines = [
+                f"📊 <b>PRICED-IN BEARISH</b> • {date_str}",
+                f"<i>Market already reacted — consider momentum only</i>",
+                "",
+            ]
+            for idx, item in enumerate(top_priced_bearish, 1):
+                lines.extend(cls._format_candidate_card(item, idx, is_bullish=False))
+            for chunk in cls._chunk_text("\n".join(lines).strip()):
+                messages.append(chunk)
+
+        # ── Optional: Major Sector Catalysts ──────────────────────
         major_section = cls._format_major_catalysts(analyses)
         if major_section:
-            lines_bearish.extend(major_section)
-
-        bearish_text = "\n".join(lines_bearish).strip()
-        for chunk in cls._chunk_text(bearish_text):
-            messages.append(chunk)
+            major_text = "\n".join(major_section).strip()
+            for chunk in cls._chunk_text(major_text):
+                messages.append(chunk)
 
         return messages
 
@@ -174,7 +275,6 @@ class TelegramFormatter:
                             source_label = art.source_name
                         break
 
-            # Deduplicate by event
             seen_events.add(ev.id)
 
             if is_thematic:
@@ -194,7 +294,7 @@ class TelegramFormatter:
             card_lines.append("")
 
             cards.extend(card_lines)
-            if len(seen_events) >= 3:  # Limit to Top 3 major developments
+            if len(seen_events) >= 3:
                 break
 
         if not cards:

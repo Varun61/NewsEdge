@@ -207,10 +207,29 @@ class BaseAIProvider(ABC):
         ]
 
         # Retrospective post-market reporting of already concluded price action
-        is_retrospective_rally = bool(re.search(
-            r"\b(?:shares?|stocks?)\s+(?:surge\w*|rall\w*|jump\w*|rose|gain\w*|climb\w*|skyrocket\w*)\s+(?:over\s+|nearly\s+|up\s+to\s+)?(?:\d+%\b|\d+\s*percent|\d+\s*pts)",
-            h_lower
-        )) and not any(kw in h_lower for kw in ["bags order", "secures order", "wins contract", "awarded order", "wins order"])
+        _RETRO_PATTERNS = [
+            # "shares jump/surge/rally/gain/climb X%"
+            r"\b(?:shares?|stocks?)\s+(?:surge\w*|rall\w*|jump\w*|rose|gain\w*|climb\w*|soar\w*|skyrocket\w*|zoom\w*)\s+(?:over\s+|nearly\s+|up\s+to\s+|by\s+)?(?:\d+)",
+            # "shares gain after", "shares rise after" (past tense recap)
+            r"\b(?:shares?|stocks?)\s+(?:gain|rise|extend|hit)\w*\s+(?:after|as|on|following)\b",
+            # "stock up X% today", "stock up over 6%"
+            r"\b(?:shares?|stocks?|stock)\s+(?:up|down)\s+(?:over\s+)?\d+",
+            # "extends/extend gains to X%", "extend 2026 gains"
+            r"\bextend\w*\s+(?:\d{4}\s+)?gain",
+            # "hits/at record high", "hits 52-week high", "hits year-high", "all-time high"
+            r"\b(?:hits?|touches?|scaled|at)\s+(?:a\s+)?(?:52-week|record|all-time|year|new|fresh|lifetime)\s*(?:-\s*)?high",
+            # "Up X% from 52-week low / from IPO / in X sessions"
+            r"\bup\s+\d+.*(?:from\s+(?:52-week\s+)?low|from\s+ipo|in\s+\d+\s+(?:session|day|month|week))",
+            # "rallies/surges/jumps X%" (when referring to stock/shares or at start of headline)
+            r"(?:^|\b(?:shares?|stocks?|counter|scrip)\s+)(?:rallies|surges|jumps|zooms|skyrockets|soars)\s+(?:whopping\s+)?(?:\d+%|\d+\s*percent)",
+            # "Q2 results impact: X shares gain/hit"
+            r"(?:results?\s+impact|result\s+impact)\s*:\s*\w+\s+shares?\s+(?:gain|hit|rise|rally|jump|surge)",
+        ]
+        _RETRO_SAFE_KEYWORDS = ["bags order", "secures order", "wins contract", "awarded order", "wins order", "inaugurates", "commissions plant"]
+        is_retrospective_rally = (
+            any(bool(re.search(pat, h_lower)) for pat in _RETRO_PATTERNS)
+            and not any(kw in h_lower for kw in _RETRO_SAFE_KEYWORDS)
+        )
 
         if is_regulatory_relief:
             cat = "REGULATORY_APPROVAL"
@@ -264,6 +283,32 @@ class BaseAIProvider(ABC):
             materiality = "Retrospective media recap of concluded price surge; momentum exhausted for next session."
             risks = ["Profit-taking after initial surge", "Gap-fade on open"]
 
+        # ── 1b. Explicit profit decline guard — must be evaluated before bullish PROFIT_KEYWORDS ──
+        PROFIT_DECLINE_PATTERNS = [
+            r"\bprofit\s+(?:falls?|drops?|declines?|slips?|dips?|narrows?|shrinks?|contracts?|plunges?|plummets?|tumbles?|slides?|sinks?)\b",
+            r"\b(?:net|pat|ebitda)\s+(?:falls?|drops?|declines?|slips?|dips?|shrinks?|plunges?|tumbles?)\b",
+            r"\bprofit\s+(?:down|lower)\s+\d+",
+            r"\bloss\s+(?:widens?|deepens?|balloons?|swells?|mounts?)\b",
+        ]
+        if not cat and any(re.search(pat, h_lower) for pat in PROFIT_DECLINE_PATTERNS):
+            cat = "PROFIT_WARNING"
+            sent = "NEGATIVE"
+            direction = "bearish"
+            impact = 76.0 + (8.0 if pct_val >= 30 else 4.0 if pct_val >= 15 else 0.0)
+            match_confidence = max(match_confidence, 75.0)
+            materiality = f"Quarterly profit decline ({pct_val:.1f}% drop) signaling operating weakness." if pct_val else "Quarterly profit decline signaling operating weakness."
+            risks = ["Further earnings downgrades", "Institutional sell-off", "Sector contagion"]
+
+        # ── 1c. Block deal / Stake sale = neutral-to-bearish (institutional selling pressure) ──
+        if not cat and any(phrase in h_lower for phrase in ["block deal", "stake sale", "sells stake", "offloads stake", "likely to sell", "offloading"]):
+            cat = "SHAREHOLDING_CHANGE"
+            sent = "NEGATIVE"
+            direction = "bearish"
+            impact = 62.0
+            match_confidence = max(match_confidence, 68.0)
+            materiality = "Institutional block deal or stake sale creating selling pressure."
+            risks = ["Supply overhang", "Negative sentiment", "Further stake reduction"]
+
         # ── 2. Strong Bullish Triggers ──────────────────────────────────────────
         ORDER_KEYWORDS = [
             "order win", "wins order", "bags order", "bags contract", "secures order", "secures deal",
@@ -285,7 +330,7 @@ class BaseAIProvider(ABC):
             "prepays debt", "acquires stake", "qip launch", "preferential allotment",
         ]
 
-        if any(w in h_lower for w in ORDER_KEYWORDS):
+        if cat is None and any(w in h_lower for w in ORDER_KEYWORDS):
             cat = "ORDER_WIN"
             sent = "POSITIVE"
             direction = "bullish"
@@ -311,7 +356,7 @@ class BaseAIProvider(ABC):
             )
             risks = ["Gap-up exhaustion / sell-on-news", "Execution timeline delays", "Margin pressures"]
 
-        elif any(w in h_lower for w in PROFIT_KEYWORDS):
+        elif cat is None and any(w in h_lower for w in PROFIT_KEYWORDS):
             cat = "PROFIT_GROWTH"
             direction = "bullish"
             effective_pct = profit_pct if profit_pct is not None else pct_val
@@ -334,9 +379,15 @@ class BaseAIProvider(ABC):
                     else "Strong quarterly financial expansion driving earnings momentum."
                 )
                 risks = ["Already priced-in expectations", "Profit taking after initial surge", "General market headwinds"]
-            risks = ["Already priced-in expectations", "Profit taking after initial surge", "General market headwinds"]
 
-        elif any(w in h_lower for w in SHAREHOLDER_BULLISH):
+            # Override: if margins shrink/contract despite profit growth, downgrade
+            if any(phrase in h_lower for phrase in ["margin shrink", "margins shrink", "margin contract", "margins contract", "margin compress", "margins compress", "margin squeeze", "margins squeeze", "margin pressure", "margins pressure"]):
+                impact = min(impact, 60.0)
+                match_confidence = min(match_confidence, 62.0)
+                materiality = f"Profit growth ({pct_val:.1f}%) offset by margin compression; cautious outlook."
+                risks = ["Margin compression may worsen", "Revenue growth without profitability improvement"]
+
+        elif cat is None and any(w in h_lower for w in SHAREHOLDER_BULLISH):
             cat = (
                 "BUYBACK" if "buyback" in h_lower
                 else "REGULATORY_APPROVAL" if any(x in h_lower for x in ["fda", "usfda"])
@@ -350,7 +401,7 @@ class BaseAIProvider(ABC):
             materiality = "Shareholder value accretive action or strategic regulatory milestone."
             risks = ["Limited liquidity follow-through", "Broader sector weakness"]
 
-        elif any(w in h_lower for w in GENERAL_BULLISH):
+        elif cat is None and any(w in h_lower for w in GENERAL_BULLISH):
             cat = (
                 "ACQUISITION" if any(x in h_lower for x in ["acquires", "acquisition"])
                 else "FUND_RAISE" if any(x in h_lower for x in ["qip", "allotment"])
@@ -377,6 +428,21 @@ class BaseAIProvider(ABC):
             match_confidence = min(match_confidence, 42.0)
             materiality = "Routine corporate governance event with negligible intraday impact."
             risks = ["No meaningful catalyst"]
+
+        # ── 3b. Roundup / Buzzing / listicle headlines — not stock-specific ──
+        ROUNDUP_PATTERNS = [
+            r"^buzzing\s+stock", r"^stocks?\s+(?:in\s+focus|to\s+watch|to\s+buy)",
+            r"^\d+\s+(?:stocks?|shares?)\s+(?:to|that)", r"^top\s+\d+\s+stock",
+            r"face-off.*which.*(?:to\s+buy|better)", r"^(?:hot|trending)\s+stock",
+        ]
+        if cat is None and any(re.search(pat, h_lower) for pat in ROUNDUP_PATTERNS):
+            cat = "BUSINESS_UPDATE"
+            sent = "NEUTRAL"
+            direction = "neutral"
+            impact = 30.0
+            match_confidence = min(match_confidence, 35.0)
+            materiality = "Generic roundup or listicle article with no specific catalyst."
+            risks = ["No actionable catalyst"]
 
         # ── 4. Thematic & Sectoral Catalysts ────────────────────────────────────
         thematic_engine = get_thematic_engine()
