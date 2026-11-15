@@ -64,59 +64,68 @@ def _format_concise_headline(headline: str, max_chars: int = 75) -> str:
     return clean
 
 
-def _is_priced_in(analysis: StockAnalysis) -> bool:
-    """Determine if the news was published during market hours (already priced in).
-    
-    News published between 9:15 AM IST and 3:30 PM IST on a weekday
-    is considered 'priced in' — the market has already reacted.
+def _is_priced_in(analysis: StockAnalysis, as_of_dt: Optional[datetime] = None) -> bool:
+    """Determine if the news was published before the most recent market close (3:30 PM IST),
+    or if it describes retrospective price action that already occurred.
+
+    Rules:
+    1. Retrospective headlines (e.g. 'shares jump 9% after Q2 profit', 'stock up today'):
+       ALWAYS PRICED IN regardless of when published.
+    2. Published BEFORE the most recent market close (3:30 PM IST):
+       PRICED IN — market has already had a session to trade this catalyst.
+    3. Published AFTER the most recent market close (3:30 PM IST) and no retrospective move:
+       FRESH — actionable for the next trading day.
     """
     event = analysis.news_event
     if not event:
         return False
-    
-    # Check article publication times
+
+    # 1. Headline-based retrospective price action check
+    h_lower = (event.primary_headline or "").lower()
+    retro_patterns = [
+        r"\b(?:shares?|stocks?|counter|scrip)\s+(?:surge|surged|rall\w*|jump\w*|gain\w*|climb\w*|soar\w*|rise|rose|zoom\w*)\s+(?:over\s+|nearly\s+|by\s+)?\d+",
+        r"\b(?:shares?|stocks?|counter|scrip)\s+(?:plunge|plunged|drop\w*|fall\w*|tank\w*|slump\w*|slide|slid)\s+(?:over\s+|nearly\s+|by\s+)?\d+",
+        r"\b(?:shares?|stocks?|counter|scrip)\s+(?:gain|rise|hit|extend|jump|fall|drop|tank)\w*\s+(?:after|as|on)\b",
+        r"\bextend\w*\s+(?:\d{4}\s+)?gain",
+        r"\b(?:hits?|at)\s+(?:52-week|record|all-time|year|new|lifetime)\s*-?\s*high",
+        r"\bup\s+\d+.*(?:from\s+(?:52-week\s+)?low|from\s+ipo)",
+        r"\b(?:stock|shares?)\s+(?:up|down)\s+(?:over\s+)?\d+%?\s+today",
+        r"\b(?:jumps?|surges?|rallies|rallied)\s+\d+%.*after",
+        r"\b(?:plunges?|drops?|falls?|slumps?|tanks?)\s+\d+%.*after",
+        r"\b(?:gains?|rallies|jumps?|slides?|falls?)\s+up\s+to\s+\d+%",
+    ]
+    if any(re.search(pat, h_lower) for pat in retro_patterns):
+        return True
+
+    # 2. Extract publication time
     pub_times = []
     if event.article_links:
         for link in event.article_links:
             art = getattr(link, "article", None)
             if art and getattr(art, "published_at", None):
                 pub_times.append(art.published_at)
-    
+
     if not pub_times:
         if event.created_at:
             pub_times.append(event.created_at)
         else:
             return False
-    
+
     # Use the earliest publication time
     earliest = min(pub_times)
     if earliest.tzinfo is None:
         earliest = earliest.replace(tzinfo=timezone.utc)
-    
+
     earliest_ist = earliest.astimezone(IST)
-    pub_time = earliest_ist.time()
-    pub_weekday = earliest_ist.weekday()
-    
-    # During market hours: 9:15 AM to 3:30 PM IST on weekdays
-    market_open = time(9, 15)
-    market_close = time(15, 30)
-    
-    if pub_weekday < 5 and market_open <= pub_time <= market_close:
+
+    # 3. Check against latest market close (15:30 IST)
+    from app.trading_calendar import get_last_market_close
+    last_close = get_last_market_close(as_of_dt)
+
+    # If published before the latest market close, market already traded it
+    if earliest_ist < last_close:
         return True
-    
-    # Also check: headline mentions retrospective price action
-    h_lower = (event.primary_headline or "").lower()
-    retro_patterns = [
-        r"\b(?:shares?|stocks?)\s+(?:surge|rall|jump|gain|climb|soar|rise|zoom)\w*\s+(?:over\s+|nearly\s+|by\s+)?\d+",
-        r"\b(?:shares?|stocks?)\s+(?:gain|rise|hit|extend)\w*\s+(?:after|as|on)\b",
-        r"\bextend\w*\s+(?:\d{4}\s+)?gain",
-        r"\b(?:hits?|at)\s+(?:52-week|record|all-time|year|new|lifetime)\s*-?\s*high",
-        r"\bup\s+\d+.*(?:from\s+(?:52-week\s+)?low|from\s+ipo)",
-        r"\b(?:stock|shares?)\s+(?:up|down)\s+(?:over\s+)?\d+%?\s+today",
-    ]
-    if any(re.search(pat, h_lower) for pat in retro_patterns):
-        return True
-    
+
     return False
 
 

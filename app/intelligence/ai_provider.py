@@ -206,24 +206,23 @@ class BaseAIProvider(ABC):
             "ceo resigns", "md resigns", "cfo resigns", "steps down",
         ]
 
-        # Retrospective post-market reporting of already concluded price action
+        # Retrospective post-market reporting of already concluded price action (rallies or dumps)
+        _RETRO_NOUNS = r"(?:shares?|stocks?|share\s+price|stock\s+price|counter|scrip)"
+        _RETRO_VERBS = r"(?:surge\w*|rall\w*|jump\w*|rise|rose|rises|gain\w*|climb\w*|soar\w*|skyrocket\w*|zoom\w*)"
         _RETRO_PATTERNS = [
-            # "shares jump/surge/rally/gain/climb X%"
-            r"\b(?:shares?|stocks?)\s+(?:surge\w*|rall\w*|jump\w*|rose|gain\w*|climb\w*|soar\w*|skyrocket\w*|zoom\w*)\s+(?:over\s+|nearly\s+|up\s+to\s+|by\s+)?(?:\d+)",
-            # "shares gain after", "shares rise after" (past tense recap)
-            r"\b(?:shares?|stocks?)\s+(?:gain|rise|extend|hit)\w*\s+(?:after|as|on|following)\b",
-            # "stock up X% today", "stock up over 6%"
-            r"\b(?:shares?|stocks?|stock)\s+(?:up|down)\s+(?:over\s+)?\d+",
-            # "extends/extend gains to X%", "extend 2026 gains"
-            r"\bextend\w*\s+(?:\d{4}\s+)?gain",
-            # "hits/at record high", "hits 52-week high", "hits year-high", "all-time high"
+            # Noun + verb + % (e.g. shares fall 10%, share price jumps 14%)
+            rf"\b{_RETRO_NOUNS}\s+{_RETRO_VERBS}\s+(?:over\s+|nearly\s+|up\s+to\s+|by\s+)?\d+%",
+            # Noun + verb + preposition (e.g. shares rise after, stock falls on)
+            rf"\b{_RETRO_NOUNS}\s+{_RETRO_VERBS}\s+(?:after|as|on|following|despite|amid)\b",
+            # Verb + % + preposition when starting with stock/shares (e.g. stock jumped 9% after)
+            rf"(?:^|\b{_RETRO_NOUNS}\s+){_RETRO_VERBS}\s+(?:over\s+|nearly\s+|up\s+to\s+|by\s+)?\d+%.*?\b(?:after|on|following|as|amid)\b",
+            # Hits 52-week / record high or low
             r"\b(?:hits?|touches?|scaled|at)\s+(?:a\s+)?(?:52-week|record|all-time|year|new|fresh|lifetime)\s*(?:-\s*)?high",
-            # "Up X% from 52-week low / from IPO / in X sessions"
+            # Up/down X% from low / from IPO / today
             r"\bup\s+\d+.*(?:from\s+(?:52-week\s+)?low|from\s+ipo|in\s+\d+\s+(?:session|day|month|week))",
-            # "rallies/surges/jumps X%" (when referring to stock/shares or at start of headline)
-            r"(?:^|\b(?:shares?|stocks?|counter|scrip)\s+)(?:rallies|surges|jumps|zooms|skyrockets|soars)\s+(?:whopping\s+)?(?:\d+%|\d+\s*percent)",
-            # "Q2 results impact: X shares gain/hit"
-            r"(?:results?\s+impact|result\s+impact)\s*:\s*\w+\s+shares?\s+(?:gain|hit|rise|rally|jump|surge)",
+            rf"\b{_RETRO_NOUNS}\s+(?:up|down)\s+(?:over\s+)?\d+",
+            r"\bextend\w*\s+(?:\d{4}\s+)?gain",
+            r"(?:results?\s+impact|result\s+impact)\s*:\s*\w+\s+shares?\s+(?:gain|hit|rise|rally|jump|surge|fall|drop)",
         ]
         _RETRO_SAFE_KEYWORDS = ["bags order", "secures order", "wins contract", "awarded order", "wins order", "inaugurates", "commissions plant"]
         is_retrospective_rally = (
@@ -248,6 +247,15 @@ class BaseAIProvider(ABC):
             match_confidence = max(match_confidence, 82.0)  # confirmed regulatory = high conviction
             materiality = "Severe regulatory/governance risk with immediate intraday downside selling pressure."
             risks = ["Panic selling at open", "Prolonged institutional derating", "Reputational overhang"]
+
+        elif is_retrospective_rally:
+            cat = "BUSINESS_UPDATE"
+            sent = "NEUTRAL"
+            direction = "neutral"
+            impact = 45.0
+            match_confidence = min(match_confidence, 50.0)
+            materiality = "Retrospective reporting of already completed intraday price move. Excluded from next-day pre-market signals."
+            risks = ["Move already played out in cash market", "High risk of gap-up exhaustion or mean reversion"]
 
         elif any(w in h_lower for w in MARKET_REJECTION):
             cat = "PROFIT_WARNING" if any(x in h_lower for x in ["profit", "net", "loss", "margin", "q1", "q2", "q3", "q4"]) else "BUSINESS_UPDATE"
@@ -274,14 +282,6 @@ class BaseAIProvider(ABC):
             materiality = f"Disappointing operating performance ({pct_val:.1f}% drop)" if pct_val else "Disappointing operating performance or governance concern."
             risks = ["Gap-down open", "Negative earnings revision", "Further sell-off below key support"]
 
-        elif is_retrospective_rally:
-            cat = "BUSINESS_UPDATE"
-            sent = "NEUTRAL"
-            direction = "neutral"
-            impact = 45.0
-            match_confidence = min(match_confidence, 50.0)
-            materiality = "Retrospective media recap of concluded price surge; momentum exhausted for next session."
-            risks = ["Profit-taking after initial surge", "Gap-fade on open"]
 
         # ── 1b. Explicit profit decline guard — must be evaluated before bullish PROFIT_KEYWORDS ──
         PROFIT_DECLINE_PATTERNS = [

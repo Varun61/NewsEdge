@@ -127,11 +127,29 @@ class TijoriFinanceCollector(BaseCollector):
                 f"Operating profit YoY: {op_yoy} (₹{op_val} Cr)."
             )
 
+            # Extract date if available in Tijori HTML
+            pub_dt = now_dt
+            date_span = item.find("span", class_=lambda c: c and "event_date" in c)
+            if date_span:
+                d_text = date_span.get_text(strip=True)
+                if d_text.lower() != "today":
+                    try:
+                        import dateparser
+                        import pytz
+                        ist_tz = pytz.timezone("Asia/Kolkata")
+                        parsed_d = dateparser.parse(d_text)
+                        if parsed_d:
+                            # Default to 16:00 IST on that announcement date
+                            parsed_dt_ist = ist_tz.localize(datetime.combine(parsed_d.date(), datetime.min.time().replace(hour=16)))
+                            pub_dt = parsed_dt_ist.astimezone(timezone.utc)
+                    except Exception:
+                        pass
+
             article = CollectedArticle(
                 headline=headline,
                 article_url=full_url or self.source_url,
                 source_name=self.source_name,
-                published_at=now_dt,
+                published_at=pub_dt,
                 raw_content=summary,
                 extracted_text=summary,
                 company_mentions=[comp_name],

@@ -70,6 +70,13 @@ PRICES_CACHE_FILE = PROJECT_ROOT / "data" / "backtest_prices_cache.json"
 # Article Caching & Collection
 # ══════════════════════════════════════════════════════════════════════════
 
+YF_TICKER_OVERRIDES = {
+    "TATAMOTORS": "TMCV.NS",
+    "TATAMTRDVR": "TMPV.NS",
+}
+REVERSE_OVERRIDES = {v: k for k, v in YF_TICKER_OVERRIDES.items()}
+
+
 def load_cached_articles() -> dict[str, list[dict]]:
     """Load cached articles grouped by date (YYYY-MM-DD)."""
     if CACHE_FILE.exists():
@@ -89,13 +96,38 @@ def save_cached_articles(cache: dict[str, list[dict]]) -> None:
 
 
 def fetch_month_articles_from_rss(start_date: date, end_date: date) -> dict[str, list[dict]]:
-    """Fetch corporate news across the month using date-bracketed Google News queries."""
+    """Fetch corporate news across the month using Google News RSS and local database articles."""
     cache = load_cached_articles()
-    
+
+    # Always seed / merge latest articles from local database (including Tijori, MarketByte, Screener, NSE)
+    try:
+        with get_session() as session:
+            db_articles = session.query(RawArticle).all()
+            new_db_count = 0
+            for art in db_articles:
+                if art.published_at:
+                    dt_str = str(art.published_at.date())
+                    if dt_str not in cache:
+                        cache[dt_str] = []
+                    if not any(a["url"] == art.article_url for a in cache[dt_str]):
+                        cache[dt_str].append({
+                            "headline": art.headline,
+                            "url": art.article_url,
+                            "published_at": art.published_at.isoformat(),
+                            "source": art.source.name if art.source else "Database",
+                            "summary": art.extracted_text or art.headline,
+                        })
+                        new_db_count += 1
+            if new_db_count > 0:
+                logger.info("Merged %d new database/earnings articles into backtest cache.", new_db_count)
+                save_cached_articles(cache)
+    except Exception as exc:
+        logger.debug("Database article cache merge notice: %s", exc)
+
     # Check if we already have sufficient articles cached for all days
     cached_days = set(cache.keys())
     needed_days = set((start_date + timedelta(days=i)).isoformat() for i in range((end_date - start_date).days + 1))
-    
+
     if needed_days.issubset(cached_days) and all(len(cache.get(d, [])) >= 5 for d in needed_days):
         logger.info("Using cached articles for %d days (%d total articles)", len(cache), sum(len(v) for v in cache.values()))
         return cache
@@ -222,8 +254,10 @@ def fetch_historical_prices_batch(
         return history
 
     logger.info("Downloading historical prices for %d missing symbols (%s to %s)...", len(missing_symbols), start_date, end_date)
-    yf_symbols = [f"{s}.NS" for s in missing_symbols]
-    
+    yf_symbol_map = {s: YF_TICKER_OVERRIDES.get(s, f"{s}.NS") for s in missing_symbols}
+    yf_symbols = list(set(yf_symbol_map.values()))
+    reverse_map = {v: k for k, v in yf_symbol_map.items()}
+
     # Download in batches of 40 symbols
     chunk_size = 40
     for i in range(0, len(yf_symbols), chunk_size):
@@ -238,9 +272,9 @@ def fetch_historical_prices_batch(
                 progress=False,
                 threads=True,
             )
-            
+
             for yf_sym in chunk:
-                sym = yf_sym.replace(".NS", "")
+                sym = reverse_map.get(yf_sym, yf_sym.replace(".NS", ""))
                 sym_df = df[yf_sym] if len(chunk) > 1 else df
                 if sym_df.empty:
                     continue

@@ -188,3 +188,53 @@ def test_telegram_formatter_four_categories(session):
     assert "INVENTURE" in combined
     assert "CUPID" in combined
     assert "LINK" in combined or "<code>" in combined
+
+
+def test_sunday_and_monday_window_picks_friday_330pm():
+    from app.trading_calendar import get_effective_collection_window, utc_to_ist
+    # Sunday run: 15-Nov-2026
+    sunday = date(2026, 11, 15)
+    start_utc, end_utc, desc = get_effective_collection_window(report_date=sunday)
+    start_ist = utc_to_ist(start_utc)
+    # Must start Friday 13-Nov at 15:30 IST
+    assert start_ist.date() == date(2026, 11, 13)
+    assert start_ist.hour == 15
+    assert start_ist.minute == 30
+
+    # Monday run: 16-Nov-2026
+    monday = date(2026, 11, 16)
+    start_utc_m, end_utc_m, desc_m = get_effective_collection_window(report_date=monday)
+    start_ist_m = utc_to_ist(start_utc_m)
+    # Must also start Friday 13-Nov at 15:30 IST
+    assert start_ist_m.date() == date(2026, 11, 13)
+    assert start_ist_m.hour == 15
+    assert start_ist_m.minute == 30
+
+
+def test_quarterly_results_priced_in_if_before_330pm_or_retrospective():
+    from app.reporting.telegram_formatter import _is_priced_in
+    # 1. Quarterly result announced during market hours (Friday 1:30 PM IST)
+    ev_midday = NewsEvent(
+        primary_headline="Ashok Leyland Q2 profit jumps 16.4% YoY to ₹2,805 Cr",
+        created_at=datetime(2026, 11, 13, 8, 0, tzinfo=timezone.utc),  # 1:30 PM IST (before 3:30 PM)
+    )
+    analysis_midday = StockAnalysis(news_event=ev_midday)
+    # Reference date is Friday 13-Nov 6:00 PM IST (post-close)
+    ref_dt = datetime(2026, 11, 13, 12, 30, tzinfo=timezone.utc)
+    assert _is_priced_in(analysis_midday, as_of_dt=ref_dt) is True
+
+    # 2. Quarterly result announced post market (Friday 5:30 PM IST)
+    ev_postmarket = NewsEvent(
+        primary_headline="Ashok Leyland Q2 profit jumps 16.4% YoY to ₹2,805 Cr",
+        created_at=datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc),  # 5:30 PM IST (after 3:30 PM)
+    )
+    analysis_postmarket = StockAnalysis(news_event=ev_postmarket)
+    assert _is_priced_in(analysis_postmarket, as_of_dt=ref_dt) is False
+
+    # 3. Retrospective quarterly rally (stock already jumped 9%)
+    ev_retro = NewsEvent(
+        primary_headline="Stock jumps 9% after strong profit growth in Q2",
+        created_at=datetime(2026, 11, 13, 12, 30, tzinfo=timezone.utc),
+    )
+    analysis_retro = StockAnalysis(news_event=ev_retro)
+    assert _is_priced_in(analysis_retro, as_of_dt=ref_dt) is True

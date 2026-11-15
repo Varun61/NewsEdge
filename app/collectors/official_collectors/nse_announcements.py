@@ -81,11 +81,14 @@ class NSEAnnouncementCollector(BaseCollector):
             att_text = item.get("attchmntText", "")
             sort_date_str = item.get("sort_date", "")
 
-            # Parse date
+            # Parse date (NSE sort_date is in IST: "YYYY-MM-DD HH:MM:SS")
             pub_dt = None
             if sort_date_str:
                 try:
-                    pub_dt = datetime.strptime(sort_date_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                    import pytz
+                    ist_tz = pytz.timezone("Asia/Kolkata")
+                    dt_naive = datetime.strptime(sort_date_str, "%Y-%m-%d %H:%M:%S")
+                    pub_dt = ist_tz.localize(dt_naive).astimezone(timezone.utc)
                 except Exception:
                     pub_dt = datetime.now(timezone.utc)
             else:
