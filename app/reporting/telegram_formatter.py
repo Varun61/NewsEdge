@@ -197,6 +197,7 @@ class TelegramFormatter:
         else:
             for idx, item in enumerate(top_fresh_bullish, 1):
                 lines.extend(cls._format_candidate_card(item, idx, is_bullish=True))
+            lines.append("⚡ <i>Execution Tip: If a stock gaps up > 3% at open, avoid chasing market orders. Allow 15-min consolidation.</i>")
         for chunk in cls._chunk_text("\n".join(lines).strip()):
             messages.append(chunk)
 

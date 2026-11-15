@@ -289,6 +289,11 @@ class BaseAIProvider(ABC):
             r"\b(?:net|pat|ebitda)\s+(?:falls?|drops?|declines?|slips?|dips?|shrinks?|plunges?|tumbles?)\b",
             r"\bprofit\s+(?:down|lower)\s+\d+",
             r"\bloss\s+(?:widens?|deepens?|balloons?|swells?|mounts?)\b",
+            r"\bmargins?\s+(?:shrink\w*|contract\w*|narrow\w*|drop\w*|fall\w*|sinks?)",
+            r"\bmargin\s+pressure\b",
+            r"\bguidance\s+(?:cut|lowered|slashed|reduced|downgraded)",
+            r"\bcuts?\s+guidance\b",
+            r"\bdemand\s+slowdown\b",
         ]
         if not cat and any(re.search(pat, h_lower) for pat in PROFIT_DECLINE_PATTERNS):
             cat = "PROFIT_WARNING"

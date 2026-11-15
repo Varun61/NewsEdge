@@ -455,6 +455,47 @@ def run_pipeline_for_day(
         if any(re.search(pat, hl_lower) for pat in speculative_patterns):
             penalties -= 10.0
 
+        # Sub-par growth (<8%) or flat profit deceleration (e.g. HDFC Bank, Colgate, LTM)
+        is_subpar_growth = False
+        low_growth_match = re.search(r"\b(?:profit|pat|net)\b.*?\b(?:rises|up|grows)\b\s+(\d+(?:\.\d+)?)%", hl_lower)
+        if low_growth_match and float(low_growth_match.group(1)) < 8.0:
+            penalties -= 14.0
+            is_subpar_growth = True
+        elif any(w in hl_lower for w in ["pat remains flat", "profit remains flat", "flat pat", "profit flat"]):
+            penalties -= 14.0
+            is_subpar_growth = True
+
+        # Operating margin compression (e.g. Bajaj Consumer, Tata Consumer)
+        is_margin_compression = any(re.search(pat, hl_lower) for pat in [
+            r"\bmargins?\s+(?:shrink\w*|contract\w*|narrow\w*|drop\w*|fall\w*|decline\w*|sinks?)",
+            r"\bmargin\s+pressure\b",
+            r"\bebitda\s+margin\s+(?:down|drops|falls|contracts)",
+            r"\boperating\s+margin\s+(?:down|drops|falls|contracts)",
+        ])
+        if is_margin_compression:
+            penalties -= 18.0
+
+        # Unquantified order win (e.g. Titagarh Rail Systems)
+        is_unquantified_order = False
+        if cat_str == "ORDER_WIN":
+            has_rupee = bool(re.search(r"(?:rs\.?|inr|₹|usd|\$)\s*[\d,]+(?:\.\d+)?\s*(?:crore|cr|million|billion|mn|bn)\b", hl_lower))
+            if not has_rupee:
+                penalties -= 12.0
+                is_unquantified_order = True
+
+        # Negative forward guidance / concall headwinds
+        is_neg_guidance = any(re.search(pat, hl_lower) for pat in [
+            r"\bguidance\s+(?:cut|lowered|slashed|reduced|downgraded)",
+            r"\bcuts?\s+guidance\b",
+            r"\bdemand\s+slowdown\b",
+            r"\bpricing\s+pressure\b",
+            r"\bfurloughs?\b",
+            r"\bdelayed\s+(?:decision|capex|order)",
+            r"\bcautious\s+outlook\b",
+        ])
+        if is_neg_guidance:
+            penalties -= 18.0
+
         final_score = max(0.0, min(100.0, raw_score + penalties))
 
         # Hard minimum confidence gate
@@ -467,6 +508,11 @@ def run_pipeline_for_day(
         if cat_str == "CAPACITY_EXPANSION" and not any(kw in hl_lower for kw in ["bags order", "wins contract", "commissions", "inaugurates"]):
             continue
         if cat_str == "BUYBACK" and final_score < 78.0:
+            continue
+        if is_margin_compression or is_subpar_growth:
+            # Margin compression or sub-par growth invalidates bullish trade thesis
+            continue
+        if is_unquantified_order and final_score < 78.0:
             continue
 
         # Classification tier assignment (tighter thresholds for actionable tiers)

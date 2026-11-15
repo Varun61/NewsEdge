@@ -195,6 +195,44 @@ class ScoringEngine:
         if any(re.search(pat, headline_lower) for pat in speculative_patterns):
             penalties["speculative_forecast"] = -10.0
 
+        # Sub-par growth (<8%) or flat profit is an institutional growth deceleration / miss
+        low_growth_match = re.search(r"\b(?:profit|pat|net)\b.*?\b(?:rises|up|grows)\b\s+(\d+(?:\.\d+)?)%", headline_lower)
+        if low_growth_match:
+            pct = float(low_growth_match.group(1))
+            if pct < 8.0:
+                penalties["subpar_growth_deceleration"] = -14.0
+        elif any(w in headline_lower for w in ["pat remains flat", "profit remains flat", "flat pat", "profit flat"]):
+            penalties["flat_growth_deceleration"] = -14.0
+
+        # Operating margin compression / margin erosion (causes post-earnings dump)
+        margin_compression_patterns = [
+            r"\bmargins?\s+(?:shrink\w*|contract\w*|narrow\w*|drop\w*|fall\w*|decline\w*|sinks?)",
+            r"\bmargin\s+pressure\b",
+            r"\bebitda\s+margin\s+(?:down|drops|falls|contracts)",
+            r"\boperating\s+margin\s+(?:down|drops|falls|contracts)",
+        ]
+        if any(re.search(pat, headline_lower) for pat in margin_compression_patterns):
+            penalties["margin_compression"] = -18.0
+
+        # Unquantified order win without monetary value (cannot be modeled by institutions)
+        if cat_str == "ORDER_WIN":
+            has_rupee_amount = bool(re.search(r"(?:rs\.?|inr|₹|usd|\$)\s*[\d,]+(?:\.\d+)?\s*(?:crore|cr|million|billion|mn|bn)\b", headline_lower))
+            if not has_rupee_amount:
+                penalties["unquantified_order_win"] = -12.0
+
+        # Negative forward guidance / concall headwinds
+        negative_guidance_patterns = [
+            r"\bguidance\s+(?:cut|lowered|slashed|reduced|downgraded)",
+            r"\bcuts?\s+guidance\b",
+            r"\bdemand\s+slowdown\b",
+            r"\bpricing\s+pressure\b",
+            r"\bfurloughs?\b",
+            r"\bdelayed\s+(?:decision|capex|order)",
+            r"\bcautious\s+outlook\b",
+        ]
+        if any(re.search(pat, headline_lower) for pat in negative_guidance_patterns):
+            penalties["negative_forward_guidance"] = -18.0
+
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 
         # 5. Hard minimum-confidence gate — if we can't verify the company, exclude from watchlist
@@ -231,6 +269,18 @@ class ScoringEngine:
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
         elif cat_str == "BUYBACK" and final_score < 78.0:
             # Routine buybacks without high conviction tend to be sell-on-news
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif "margin_compression" in penalties or "negative_forward_guidance" in penalties:
+            # Margin erosion or guidance cut invalidates bullish trade thesis
+            if is_negative or "negative_forward_guidance" in penalties:
+                candidate_class = CandidateClassification.BEARISH if final_score >= 60.0 else CandidateClassification.WATCH_ONLY
+            else:
+                candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif "unquantified_order_win" in penalties and final_score < 78.0:
+            # Orders without numeric value cannot be modeled by institutions — keep in WATCH_ONLY
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif "subpar_growth_deceleration" in penalties and final_score < 78.0:
+            # Single-digit profit growth (<8%) triggers sell-the-news
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
         elif is_negative:
             if final_score >= 78.0:
