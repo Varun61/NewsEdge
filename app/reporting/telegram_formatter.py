@@ -18,6 +18,7 @@ from __future__ import annotations
 import html
 import logging
 import re
+import urllib.parse
 from datetime import date, datetime, time, timezone
 from typing import List, Optional
 
@@ -353,7 +354,13 @@ class TelegramFormatter:
                     url = art.article_url
                     break
 
-        link_html = f' • <a href="{_esc(url)}">LINK</a>' if url else ""
+        # Guaranteed fallback: generate direct Google News query URL so no pick ever lacks a link
+        if not url:
+            clean_hl = re.sub(r"[^\w\s]", " ", headline[:60]).strip()
+            query_str = urllib.parse.quote_plus(f"{symbol} {clean_hl}")
+            url = f"https://news.google.com/search?q={query_str}"
+
+        link_html = f' • <a href="{_esc(url)}">LINK</a>'
 
         tier = cls._conviction_tier(analysis.overall_score)
 

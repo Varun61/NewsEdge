@@ -24,6 +24,18 @@ PUBLISHER_SUFFIX_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+INDIAN_GEOGRAPHIC_STOPWORDS: Set[str] = {
+    "tamil nadu", "tamil", "nadu", "karnataka", "maharashtra", "gujarat", "delhi", "new delhi",
+    "punjab", "haryana", "rajasthan", "uttar pradesh", "madhya pradesh", "andhra pradesh",
+    "telangana", "kerala", "west bengal", "bengal", "odisha", "orissa", "bihar", "assam",
+    "jharkhand", "chhattisgarh", "uttarakhand", "himachal pradesh", "himachal", "goa", "tripura",
+    "manipur", "meghalaya", "nagaland", "mizoram", "sikkim", "arunachal pradesh", "arunachal",
+    "jammu", "kashmir", "ladakh", "puducherry", "pondicherry", "chandigarh", "lakshadweep",
+    "andaman", "nicobar", "daman", "diu", "dadra", "nagar haveli", "south india", "north india",
+    "east india", "west india", "central india", "northeast india", "ncr", "delhi-ncr", "delhi ncr",
+    "mumbai", "chennai", "kolkata", "bengaluru", "bangalore", "hyderabad", "pune", "ahmedabad"
+}
+
 ALIAS_STOPWORDS: Set[str] = {
     "india", "indian", "limited", "ltd", "the", "and", "life", "tech", "power", "gold", "rate",
     "bank", "auto", "news", "new", "good", "best", "next", "real", "true", "care", "fast",
@@ -38,8 +50,8 @@ ALIAS_STOPWORDS: Set[str] = {
     "premier", "universal", "supreme", "advanced", "applied", "associated", "integrated", "allied",
     "eastern", "western", "southern", "northern", "cooperative", "construction", "consultancy",
     "share", "shares", "stock", "stocks", "equity", "equities", "exchange", "exchanges",
-    "fund", "funds", "bond", "bonds", "debt", "debts", "price", "prices", "rates"
-}
+    "fund", "funds", "bond", "bonds", "debt", "debts", "price", "prices", "rates",
+} | INDIAN_GEOGRAPHIC_STOPWORDS
 
 SYMBOL_STOPWORDS: Set[str] = {
     "A", "ALL", "AT", "AN", "AND", "AS", "BE", "BY", "FOR", "GO", "IN", "IS",
@@ -206,9 +218,11 @@ class NSEStockResolver:
                                     self._alias_map[single] = sym
                             elif len(base_words) >= 2:
                                 # 2-word brand prefix (e.g. "Action Construction", "Silver Touch", "Tata Steel")
-                                two_words = " ".join(base_words[:2])
-                                if len(two_words) >= 5 and two_words not in ALIAS_STOPWORDS:
-                                    self._alias_map[two_words] = sym
+                                # Reject if either word is an Indian state, region, or common stopword (e.g. "Tamil Nadu")
+                                if not any(w in INDIAN_GEOGRAPHIC_STOPWORDS for w in base_words[:2]):
+                                    two_words = " ".join(base_words[:2])
+                                    if len(two_words) >= 5 and two_words not in ALIAS_STOPWORDS:
+                                        self._alias_map[two_words] = sym
                             if len(base_words) >= 3:
                                 three_words = " ".join(base_words[:3])
                                 if len(three_words) >= 7 and three_words not in ALIAS_STOPWORDS:
@@ -367,6 +381,20 @@ class NSEStockResolver:
                 logger.debug("Filtered Trident Hotel news from Trident textiles")
                 return None
 
+        # 6. Benchmark comparison guard: headline compares another company against this one as benchmark
+        # e.g. "smaller than Tata Capital", "lower valuation than Tata Capital", "rivals TCS", "better than Infosys"
+        if sym in self._symbol_map:
+            name_norm = self.normalize_text(info.get("name", ""))
+            short_aliases = [norm_alias for norm_alias, s in self._sorted_aliases if s == sym]
+            terms_to_check = [sym.lower()] + ([name_norm] if name_norm else []) + short_aliases
+            for t in terms_to_check:
+                if not t or len(t) < 3:
+                    continue
+                bench_pattern = rf"\b(?:than|versus|vs\.?|compared\s+to|rivals?|beats?|lagging)\s+{re.escape(t)}\b"
+                if re.search(bench_pattern, norm_headline):
+                    logger.debug("Filtered comparative benchmark entity %s from headline: %s", sym, norm_headline[:60])
+                    return None
+
         return info
 
     def resolve_from_text(self, headline: str, body_text: str = "") -> Optional[dict]:
@@ -397,21 +425,21 @@ class NSEStockResolver:
             cand = ticker_match.group(1).upper()
             if cand in self._symbol_map:
                 info = self._symbol_map[cand]
-                return self._disambiguate_match({**info, "confidence": 98.0, "match_source": "explicit_ticker"}, norm_headline, norm_combined)
+                return self._disambiguate_match({**info, "confidence": 98.0, "match_source": "explicit_ticker", "is_headline_match": True}, norm_headline, norm_combined)
 
         # 2. Check for standalone uppercase ticker symbol in headline (e.g. "TCS Q2 results", "BHEL bags order")
         upper_tokens = re.findall(r"\b([A-Z0-9\-]{3,15})\b", cleaned_hl)
         for tok in upper_tokens:
             if tok in self._symbol_map and tok not in SYMBOL_STOPWORDS:
                 info = self._symbol_map[tok]
-                return self._disambiguate_match({**info, "confidence": 96.0, "match_source": f"headline_symbol:{tok}"}, norm_headline, norm_combined)
+                return self._disambiguate_match({**info, "confidence": 96.0, "match_source": f"headline_symbol:{tok}", "is_headline_match": True}, norm_headline, norm_combined)
 
         # 3. Check for exact alias/name matches in cleaned headline (longest phrase first)
         for phrase, sym in self._sorted_aliases:
             pattern = rf"\b{re.escape(phrase)}\b"
             if re.search(pattern, norm_headline):
                 info = self._symbol_map[sym]
-                return self._disambiguate_match({**info, "confidence": 95.0, "match_source": f"headline_match:{phrase}"}, norm_headline, norm_combined)
+                return self._disambiguate_match({**info, "confidence": 95.0, "match_source": f"headline_match:{phrase}", "is_headline_match": True}, norm_headline, norm_combined)
 
         # 4. Check for 2-word n-grams in cleaned headline
         hl_words = norm_headline.split()
@@ -421,18 +449,28 @@ class NSEStockResolver:
                 if pair in self._alias_map:
                     sym = self._alias_map[pair]
                     info = self._symbol_map[sym]
-                    return self._disambiguate_match({**info, "confidence": 92.0, "match_source": f"headline_ngram:{pair}"}, norm_headline, norm_combined)
+                    return self._disambiguate_match({**info, "confidence": 92.0, "match_source": f"headline_ngram:{pair}", "is_headline_match": True}, norm_headline, norm_combined)
                 elif pair in self._name_map:
                     sym = self._name_map[pair]
                     info = self._symbol_map[sym]
-                    return self._disambiguate_match({**info, "confidence": 92.0, "match_source": f"headline_name_ngram:{pair}"}, norm_headline, norm_combined)
+                    return self._disambiguate_match({**info, "confidence": 92.0, "match_source": f"headline_name_ngram:{pair}", "is_headline_match": True}, norm_headline, norm_combined)
 
         # 5. Check for exact alias/name matches in combined body text
+        # STRICT RESTRICTION: Only allow body matching if:
+        # a) Upper ticker symbol explicitly appears in body (e.g. "(TNPL)", "NSE: TNPL", "BSE: TNPL")
+        # b) OR phrase is a distinctive multi-word name (>= 3 words or >= 14 chars) AND not in ALIAS_STOPWORDS
         for phrase, sym in self._sorted_aliases:
+            phrase_words = phrase.split()
+            is_long_distinctive = len(phrase_words) >= 3 or len(phrase) >= 14
+            has_explicit_ticker_in_body = bool(re.search(rf"\b(?:NSE|BSE)?\s*:?\s*\(?{re.escape(sym)}\)?\b", combined))
+
+            if not (is_long_distinctive or has_explicit_ticker_in_body):
+                continue
+
             pattern = rf"\b{re.escape(phrase)}\b"
             if re.search(pattern, norm_combined):
                 info = self._symbol_map[sym]
-                return self._disambiguate_match({**info, "confidence": 85.0, "match_source": f"body_match:{phrase}"}, norm_headline, norm_combined)
+                return self._disambiguate_match({**info, "confidence": 70.0, "match_source": f"body_match:{phrase}", "is_headline_match": False}, norm_headline, norm_combined)
 
         # 6. Fuzzy fallback match on headline words against aliases (cutoff 0.88, length >= 6)
         headline_tokens = [w for w in norm_headline.split() if len(w) >= 6 and w not in ALIAS_STOPWORDS]
@@ -442,7 +480,7 @@ class NSEStockResolver:
                 sym = self._alias_map[matches[0]]
                 info = self._symbol_map[sym]
                 if self.verify_mention_presence(sym, info.get("name", sym), headline):
-                    return self._disambiguate_match({**info, "confidence": 75.0, "match_source": f"fuzzy:{matches[0]}"}, norm_headline, norm_combined)
+                    return self._disambiguate_match({**info, "confidence": 75.0, "match_source": f"fuzzy:{matches[0]}", "is_headline_match": True}, norm_headline, norm_combined)
 
         return None
 

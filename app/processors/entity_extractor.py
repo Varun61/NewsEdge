@@ -144,6 +144,7 @@ class EntityExtractor:
         if resolved and resolved["symbol"] not in mentions:
             sym = resolved["symbol"]
             cname = resolved["name"]
+            is_hl_match = bool(resolved.get("is_headline_match", True))
             cid = self._ensure_company_in_db(
                 session,
                 symbol=sym,
@@ -157,7 +158,7 @@ class EntityExtractor:
                 nse_symbol=sym,
                 company_name=cname,
                 confidence=float(resolved["confidence"]),
-                is_primary_subject=True,
+                is_primary_subject=is_hl_match,
                 match_type="nse_resolver",
             )
 

@@ -208,6 +208,18 @@ class NewsClassifier:
                             reasoning=f"Sector-wide thematic policy catalyst: {secondary.theme_title}.",
                             is_processed=True,
                         )
+                        # Link original articles so secondary picks retain clickable news source links
+                        if event.article_links:
+                            for link in event.article_links:
+                                try:
+                                    Repository.link_article_to_event(
+                                        session=session,
+                                        event_id=new_sec_event.id,
+                                        article_id=link.raw_article_id,
+                                        is_primary=link.is_primary,
+                                    )
+                                except Exception:
+                                    pass
                         sec_class = ClassificationResult(
                             company_name=sec_comp.company_name,
                             nse_symbol=sec_sym,

@@ -28,6 +28,7 @@ from app.database.models import (
 )
 from app.database.repository import Repository
 from app.intelligence.ai_provider import ClassificationResult
+from app.processors.nse_master import ALIAS_STOPWORDS
 
 logger = logging.getLogger("newsedge.intelligence.scoring")
 
@@ -263,6 +264,32 @@ class ScoringEngine:
         if any(re.search(pat, headline_lower) for pat in negative_guidance_patterns):
             penalties["negative_forward_guidance"] = -18.0
 
+        # Routine calendar, dividend date schedules, or generic listicles
+        routine_calendar_patterns = [
+            r"\bdividend\s+this\s+week\b",
+            r"\bdividend\s+calendar\b",
+            r"\brecord\s+dates?\b",
+            r"\bstocks?\s+to\s+watch\s+this\s+week\b",
+            r"\bshares?\s+to\s+remain\s+in\s+focus\b",
+            r"\breworks?\s+20\d\d\s+target\b",
+            r"\bmeet\s+the\s+smallcap\b",
+        ]
+        if any(re.search(pat, headline_lower) for pat in routine_calendar_patterns):
+            penalties["routine_calendar_event"] = -15.0
+
+        # Entity headline verification: ensure headline actually names the company/symbol
+        company = event.primary_company
+        event_symbol = company.nse_symbol if company else ""
+        comp_name = company.company_name if company else ""
+        is_exchange_announcement = any(x in headline_lower for x in ["corporate/", "announces", "intimates", "submits", "outcome of board", "appointment", "appointed"])
+        headline_mentions_company = (
+            (event_symbol and bool(re.search(rf"\b{re.escape(event_symbol)}\b", event.primary_headline, re.IGNORECASE)))
+            or (comp_name and any(p.lower() in headline_lower for p in comp_name.lower().split() if len(p) >= 4 and p.lower() not in ALIAS_STOPWORDS))
+            or is_exchange_announcement
+        )
+        if not headline_mentions_company:
+            penalties["body_only_mention"] = -12.0
+
         # ── EARNINGS QUALITY GATE ─────────────────────────────────────────
         # Revenue-Profit divergence: profit inflated by one-offs / exceptional items
         profit_g_match = re.search(
@@ -419,7 +446,19 @@ class ScoringEngine:
             return analysis
 
         # 6. Determine Classification Priority (tighter thresholds for actionable tiers)
-        if cat_str in ("BUSINESS_UPDATE", "OTHER"):
+        mat_str = (event.financial_materiality or "").strip()
+        is_thematic_secondary = mat_str.startswith("[") and "]" in mat_str
+
+        if is_thematic_secondary:
+            # Secondary basket picks from sector themes are sympathy tracking items, not primary trade recommendations
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif "routine_calendar_event" in penalties:
+            # Ex-dividend lists and general calendar updates belong in Watch Only
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif "body_only_mention" in penalties and final_score < 86.0:
+            # Company was not in the headline; avoid recommending body passing mentions as high conviction trades
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif cat_str in ("BUSINESS_UPDATE", "OTHER"):
             # Routine commentary and generic updates never qualify for Bullish/Bearish trade watchlists
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
         elif cat_str == "CAPACITY_EXPANSION" and not any(kw in headline_lower for kw in ["bags order", "wins contract", "commissions", "inaugurates"]):

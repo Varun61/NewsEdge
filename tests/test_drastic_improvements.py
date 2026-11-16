@@ -194,3 +194,105 @@ def test_shareholding_pledge_risk_and_fii_inflows():
     assert eval_fii.score_modifier == +8.0
     assert "Institutional Inflows" in eval_fii.advisory
 
+
+def test_tnpl_state_name_not_matched_from_air_purifier_article():
+    """Verify that state names in article bodies do NOT match equities like TNPL."""
+    from app.processors.nse_master import get_nse_resolver
+    resolver = get_nse_resolver()
+    headline = "Air purifier sales surge as Delhi-NCR AQI deteriorates; demand spreads beyond traditional markets"
+    body = "Demand spreads beyond traditional markets, including Maharashtra, Karnataka, Tamil Nadu and Telangana."
+    match = resolver.resolve_from_text(headline, body)
+    # Must NOT match TNPL or any company based on state names
+    if match:
+        assert match["symbol"] != "TNPL"
+
+
+def test_comparative_benchmark_not_resolved_as_subject():
+    """Verify that benchmark comparative companies mentioned after 'than/rivals' are not picked."""
+    from app.processors.nse_master import get_nse_resolver
+    resolver = get_nse_resolver()
+    headline = "Meet the smallcap lender with faster profit growth and a lower valuation than Tata Capital"
+    match = resolver.resolve_from_text(headline, "")
+    if match:
+        assert match["symbol"] != "TATACAP"
+
+
+def test_telegram_formatter_guaranteed_clickable_links():
+    """Verify that telegram candidate cards always contain a valid clickable link."""
+    from app.database.models import StockAnalysis, CandidateClassification, NewsEvent, Company
+    from app.reporting.telegram_formatter import TelegramFormatter
+
+    comp = Company(id=1, nse_symbol="ZENTEC", company_name="Zen Technologies Limited")
+    event = NewsEvent(
+        id=1,
+        primary_headline="Rs 20,000 cr military drone opportunity: 2 defence stocks",
+        event_hash="hash_zentec_test_123",
+        financial_materiality="[Defence Theme] Drone opportunity",
+        impact_score=78.0,
+        article_links=[],  # Empty article links!
+    )
+    analysis = StockAnalysis(
+        id=1,
+        news_event_id=1,
+        company_id=1,
+        overall_score=77.0,
+        classification=CandidateClassification.BULLISH,
+    )
+    analysis.company = comp
+    analysis.news_event = event
+
+    card_lines = TelegramFormatter._format_candidate_card(analysis, 1, is_bullish=True)
+    card_text = "\n".join(card_lines)
+    assert ' • <a href="https://' in card_text
+    assert "LINK</a>" in card_text
+
+
+def test_thematic_secondary_basket_gated_to_watch_only(session):
+    """Verify secondary basket thematic events are classified as WATCH_ONLY rather than BULLISH."""
+    from app.intelligence.scoring_engine import ScoringEngine
+    from app.intelligence.ai_provider import ClassificationResult
+    from app.database.models import NewsEvent, Company, CandidateClassification
+    from app.database.repository import Repository
+
+    comp = Repository.create_company(
+        session,
+        nse_symbol="ZENTEC",
+        company_name="Zen Technologies Limited",
+        sector="Capital Goods",
+        industry="Anti-Drone",
+        annual_revenue=500.0,
+        is_active=True,
+    )
+    session.flush()
+
+    event = NewsEvent(
+        primary_headline="Rs 20,000 cr military drone opportunity: 2 defence stocks",
+        event_hash="hash_thematic_drone_999",
+        primary_company_id=comp.id,
+        financial_materiality="[Defence Theme] Secondary basket thematic catalyst",
+        impact_score=80.0,
+        confidence=85.0,
+        expected_direction="bullish",
+    )
+    session.add(event)
+    session.flush()
+
+    classification = ClassificationResult(
+        company_name=comp.company_name,
+        nse_symbol=comp.nse_symbol,
+        news_category="ORDER_WIN",
+        sentiment="VERY_POSITIVE",
+        impact_score=80.0,
+        confidence=85.0,
+        financial_materiality="[Defence Theme] Secondary basket thematic catalyst",
+        expected_direction="bullish",
+    )
+
+    from app.config import get_settings
+    scoring = ScoringEngine(get_settings())
+    analysis = scoring.score_event(event, classification, 80.0, session)
+    assert analysis is not None
+    # Must be gated to WATCH_ONLY, never actionable BULLISH or STRONG_BULLISH
+    assert analysis.classification == CandidateClassification.WATCH_ONLY
+
+
