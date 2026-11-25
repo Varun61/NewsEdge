@@ -150,8 +150,13 @@ def ensure_database_ready():
 
 def launch_pipeline(args):
     """Run full pipeline with user arguments."""
-    print("🚀 [3/4] Launching NewsEdge Pipeline across 10 financial news publishers...")
-    print(f"   Lookback Window: Last {args.hours} hours | Scheduled Mode: {args.cron}")
+    from_yesterday_close = getattr(args, "from_yesterday_close", False)
+    if from_yesterday_close:
+        print("🚀 [3/4] Launching NewsEdge Pipeline across 10 financial news publishers...")
+        print("   Lookback Window: From yesterday's 15:30 IST close till now")
+    else:
+        print("🚀 [3/4] Launching NewsEdge Pipeline across 10 financial news publishers...")
+        print(f"   Lookback Window: Last {args.hours} hours | Scheduled Mode: {args.cron}")
 
     from app.pipeline import run_pipeline
 
@@ -162,9 +167,10 @@ def launch_pipeline(args):
 
     success = run_pipeline(
         report_date=target_date,
-        lookback_hours=args.hours,
+        lookback_hours=None if from_yesterday_close else args.hours,
         is_adhoc=not args.cron,
         fresh_rebuild=True,
+        from_yesterday_close=from_yesterday_close,
     )
 
     if success:
@@ -185,6 +191,14 @@ def main():
     parser.add_argument("--hours", type=int, default=24, help="News lookback window in hours (default: 24)")
     parser.add_argument("--cron", action="store_true", help="Set flag for scheduled weekday 07:00 AM runs")
     parser.add_argument("--date", type=str, default=None, help="Specific report date (YYYY-MM-DD)")
+    parser.add_argument(
+        "--from-yesterday-close",
+        "--yesterday-close",
+        "--from-yesterday",
+        dest="from_yesterday_close",
+        action="store_true",
+        help="Collect from yesterday's 15:30 IST market close until now (useful on holidays/weekends)",
+    )
     args = parser.parse_args()
 
     print("\n" + "=" * 70)

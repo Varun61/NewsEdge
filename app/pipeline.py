@@ -59,6 +59,7 @@ def run_pipeline(
     lookback_hours: int | None = None,
     is_adhoc: bool = True,
     fresh_rebuild: bool = True,
+    from_yesterday_close: bool = False,
 ) -> bool:
     """Execute the batch processing job. Returns True on success."""
     setup_logging()
@@ -82,6 +83,7 @@ def run_pipeline(
         start_minute=settings.collection_start_minute,
         end_hour=settings.collection_end_hour,
         end_minute=settings.collection_end_minute,
+        from_yesterday_close=from_yesterday_close,
     )
 
     logger.info("Active Collection Window: %s", window_desc)
@@ -253,6 +255,14 @@ def main():
         action="store_true",
         help="Preserve existing events from previous runs instead of starting fresh",
     )
+    parser.add_argument(
+        "--from-yesterday-close",
+        "--yesterday-close",
+        "--from-yesterday",
+        dest="from_yesterday_close",
+        action="store_true",
+        help="Collect from yesterday's 15:30 IST market close until now (useful on holidays)",
+    )
     args = parser.parse_args()
 
     target_date = None
@@ -270,6 +280,7 @@ def main():
         lookback_hours=args.hours,
         is_adhoc=not args.cron,
         fresh_rebuild=not args.no_rebuild,
+        from_yesterday_close=args.from_yesterday_close,
     )
     sys.exit(0 if success else 1)
 

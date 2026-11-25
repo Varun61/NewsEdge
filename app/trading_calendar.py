@@ -37,7 +37,7 @@ NSE_HOLIDAYS: set[date] = {
     date(2026, 5, 1), date(2026, 5, 25), date(2026, 6, 16),
     date(2026, 7, 1), date(2026, 8, 15), date(2026, 9, 4),
     date(2026, 10, 2), date(2026, 10, 9), date(2026, 10, 20),
-    date(2026, 11, 14), date(2026, 11, 24), date(2026, 12, 25),
+    date(2026, 11, 14), date(2026, 11, 24), date(2026, 11, 25), date(2026, 12, 25),
 }
 
 
@@ -144,6 +144,7 @@ def get_effective_collection_window(
     start_minute: int = 30,
     end_hour: int = 7,
     end_minute: int = 59,
+    from_yesterday_close: bool = False,
 ) -> Tuple[datetime, datetime, str]:
     """Calculate the collection window dynamically.
 
@@ -162,6 +163,19 @@ def get_effective_collection_window(
     """
     current_ist = now_ist()
     target_date = report_date or current_ist.date()
+
+    # Case 0: Explicit "from yesterday's 15:30 IST close until now" override
+    if from_yesterday_close:
+        yesterday = current_ist.date() - timedelta(days=1)
+        start_ist = IST.localize(datetime.combine(yesterday, time(15, 30, 0)))
+        end_utc = now_utc()
+        start_utc = start_ist.astimezone(timezone.utc)
+        desc = (
+            f"From yesterday's 15:30 IST close: "
+            f"{start_ist.strftime('%d-%b %H:%M')} to "
+            f"{utc_to_ist(end_utc).strftime('%d-%b %H:%M')} IST"
+        )
+        return start_utc, end_utc, desc
 
     # Case 1: Scheduled cron run on a trading day (e.g. 07:59 AM morning run)
     if not is_adhoc and report_date is not None:
