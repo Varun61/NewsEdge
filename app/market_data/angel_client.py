@@ -57,6 +57,8 @@ class AngelOneClient:
         self._feed_token: Optional[str] = None
         self._session_expiry: Optional[datetime] = None
         self._lock = threading.Lock()
+        self._rate_lock = threading.Lock()
+        self._last_candle_call: float = 0.0
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -98,27 +100,42 @@ class AngelOneClient:
             "todate": to_date,
         }
 
-        try:
-            resp = self.smart.getCandleData(params)
-            if resp and resp.get("status") and resp.get("data"):
-                candles = []
-                for row in resp["data"]:
-                    # Angel returns [timestamp, open, high, low, close, volume]
-                    candles.append({
-                        "timestamp": row[0],
-                        "open":   float(row[1]),
-                        "high":   float(row[2]),
-                        "low":    float(row[3]),
-                        "close":  float(row[4]),
-                        "volume": int(row[5]),
-                    })
-                return candles
-            else:
-                logger.warning("No candle data for token %s: %s", symbol_token, resp)
+        for attempt in range(3):
+            with self._rate_lock:
+                elapsed = time.monotonic() - self._last_candle_call
+                if elapsed < 0.55:
+                    time.sleep(0.55 - elapsed)
+                self._last_candle_call = time.monotonic()
+
+            try:
+                resp = self.smart.getCandleData(params)
+                if resp and resp.get("status") and resp.get("data"):
+                    candles = []
+                    for row in resp["data"]:
+                        # Angel returns [timestamp, open, high, low, close, volume]
+                        candles.append({
+                            "timestamp": row[0],
+                            "open":   float(row[1]),
+                            "high":   float(row[2]),
+                            "low":    float(row[3]),
+                            "close":  float(row[4]),
+                            "volume": int(row[5]),
+                        })
+                    return candles
+                elif resp and "exceeding access rate" in str(resp.get("message", "")).lower():
+                    time.sleep(1.2 * (attempt + 1))
+                    continue
+                else:
+                    logger.warning("No candle data for token %s: %s", symbol_token, resp)
+                    return []
+            except Exception as exc:
+                if "access rate" in str(exc).lower() and attempt < 2:
+                    logger.debug("Rate limited on token %s, retrying (%d/3)...", symbol_token, attempt + 1)
+                    time.sleep(1.2 * (attempt + 1))
+                    continue
+                logger.error("getCandleData failed for token %s: %s", symbol_token, exc)
                 return []
-        except Exception as exc:
-            logger.error("getCandleData failed for token %s: %s", symbol_token, exc)
-            return []
+        return []
 
     def get_ltp(self, exchange: str, trading_symbol: str, symbol_token: str) -> Optional[float]:
         """Get Last Traded Price for a single symbol."""

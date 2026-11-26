@@ -116,8 +116,10 @@ def compute_intraday_snapshot(
     prev_close: float,
     today_candles: list[dict],
     avg_daily_volume: float = 0,
+    direction: str = "BULLISH",
 ) -> IntradaySnapshot:
-    """Compute all intraday indicators and produce a scored snapshot."""
+    """Compute all intraday indicators and produce a direction-aware scored snapshot."""
+    is_bullish = "bull" in direction.lower()
     vwap = calculate_vwap(today_candles)
     rsi = calculate_rsi(today_candles)
     ema9 = calculate_ema(today_candles, period=9)
@@ -152,33 +154,55 @@ def compute_intraday_snapshot(
     reasons = []
 
     # VWAP alignment (0–12 pts)
-    if vwap_pos == "above":
-        score += 12
-        reasons.append("Above VWAP ✓")
-    elif vwap_pos == "below":
-        score += 2
-        reasons.append("Below VWAP ✗")
-    elif vwap_pos == "at":
-        score += 7
-        reasons.append("At VWAP")
+    if is_bullish:
+        if vwap_pos == "above":
+            score += 12
+            reasons.append("Above VWAP ✓")
+        elif vwap_pos == "at":
+            score += 7
+            reasons.append("At VWAP")
+        elif vwap_pos == "below":
+            score += 2
+            reasons.append("Below VWAP ✗")
+    else:
+        if vwap_pos == "below":
+            score += 12
+            reasons.append("Below VWAP ✓")
+        elif vwap_pos == "at":
+            score += 7
+            reasons.append("At VWAP")
+        elif vwap_pos == "above":
+            score += 2
+            reasons.append("Above VWAP ✗")
 
     # RSI zone (0–10 pts)
     if rsi is not None:
-        if 55 <= rsi <= 75:
-            score += 10
-            reasons.append(f"RSI {rsi} (bullish zone)")
-        elif 25 <= rsi < 45:
-            score += 10
-            reasons.append(f"RSI {rsi} (bearish zone)")
-        elif 45 <= rsi < 55:
-            score += 5
-            reasons.append(f"RSI {rsi} (neutral)")
-        elif rsi > 80:
-            score += 3
-            reasons.append(f"RSI {rsi} (overbought, caution)")
-        elif rsi < 20:
-            score += 3
-            reasons.append(f"RSI {rsi} (oversold, caution)")
+        if is_bullish:
+            if 55 <= rsi <= 75:
+                score += 10
+                reasons.append(f"RSI {rsi} (bullish momentum ✓)")
+            elif 45 <= rsi < 55:
+                score += 6
+                reasons.append(f"RSI {rsi} (neutral)")
+            elif rsi > 75:
+                score += 4
+                reasons.append(f"RSI {rsi} (overbought, caution)")
+            else:
+                score += 2
+                reasons.append(f"RSI {rsi} (weak ✗)")
+        else:
+            if 25 <= rsi <= 45:
+                score += 10
+                reasons.append(f"RSI {rsi} (bearish momentum ✓)")
+            elif 45 < rsi <= 55:
+                score += 6
+                reasons.append(f"RSI {rsi} (neutral)")
+            elif rsi < 25:
+                score += 4
+                reasons.append(f"RSI {rsi} (oversold, caution)")
+            else:
+                score += 2
+                reasons.append(f"RSI {rsi} (strong ✗)")
 
     # Relative volume (0–10 pts)
     if rel_vol >= 3.0:
@@ -195,24 +219,41 @@ def compute_intraday_snapshot(
         reasons.append(f"RelVol {rel_vol}x (low)")
 
     # ORB breakout (0–8 pts)
-    if orb_signal == "breakout_up":
-        score += 8
-        reasons.append("ORB breakout UP ✓")
-    elif orb_signal == "breakout_down":
-        score += 8
-        reasons.append("ORB breakdown DOWN ✓")
-    elif orb_signal == "inside":
-        score += 2
-        reasons.append("Price inside opening range")
+    if is_bullish:
+        if orb_signal == "breakout_up":
+            score += 8
+            reasons.append("ORB breakout UP ✓")
+        elif orb_signal == "inside":
+            score += 3
+            reasons.append("Inside opening range")
+        elif orb_signal == "breakout_down":
+            reasons.append("ORB breakdown DOWN ✗")
+    else:
+        if orb_signal == "breakout_down":
+            score += 8
+            reasons.append("ORB breakdown DOWN ✓")
+        elif orb_signal == "inside":
+            score += 3
+            reasons.append("Inside opening range")
+        elif orb_signal == "breakout_up":
+            reasons.append("ORB breakout UP ✗")
 
     # EMA9 alignment (0–5 pts)
     if ema9 and ltp > 0:
-        if ltp > ema9:
-            score += 5
-            reasons.append(f"Above EMA9 ({ema9}) ✓")
+        if is_bullish:
+            if ltp > ema9:
+                score += 5
+                reasons.append(f"Above EMA9 ({ema9}) ✓")
+            else:
+                score += 1
+                reasons.append(f"Below EMA9 ({ema9})")
         else:
-            score += 1
-            reasons.append(f"Below EMA9 ({ema9})")
+            if ltp < ema9:
+                score += 5
+                reasons.append(f"Below EMA9 ({ema9}) ✓")
+            else:
+                score += 1
+                reasons.append(f"Above EMA9 ({ema9})")
 
     return IntradaySnapshot(
         symbol=symbol,
