@@ -127,8 +127,10 @@ def _collect_setups(start: date, end: date, filings_only: bool):
 def _fetch_bars(symbols: set[str], start: date, end: date):
     """Download daily OHLC for symbols + benchmark. Returns {yf_symbol: {date: row}}."""
     import yfinance as yf
+    from app.market_data.yf_symbols import to_yf_ticker
 
-    tickers = sorted({f"{s}.NS" for s in symbols} | {BENCHMARK_TICKER})
+    sym_to_yf = {s: to_yf_ticker(s) for s in symbols}
+    tickers = sorted(set(sym_to_yf.values()) | {BENCHMARK_TICKER})
     data: dict[str, dict] = {}
     df = yf.download(
         " ".join(tickers),
@@ -206,8 +208,9 @@ def run(days: int, filings_only: bool, cost: CostModel):
     by_tier: dict[str, list] = {}
     skipped = 0
 
+    from app.market_data.yf_symbols import to_yf_ticker
     for s in setups:
-        day_bars = bars.get(f"{s['symbol']}.NS", {})
+        day_bars = bars.get(to_yf_ticker(s["symbol"]), {})
         row = day_bars.get(s["trade_day"])
         if not row:
             skipped += 1

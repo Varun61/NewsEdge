@@ -63,8 +63,9 @@ class TechnicalTrendAnalyzer:
                 return self._apply_direction(cached_eval, target_direction)
 
         import yfinance as yf
+        from app.market_data.yf_symbols import to_yf_ticker
 
-        yf_ticker = f"{clean_sym}.NS"
+        yf_ticker = to_yf_ticker(clean_sym)
         try:
             # Fetch 75 days of daily data to cleanly compute 50 EMA
             ticker_obj = yf.Ticker(yf_ticker)
