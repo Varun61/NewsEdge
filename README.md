@@ -72,9 +72,16 @@ Run it with: `python -m scripts.backtest_filings --days 30`
 - [x] **NSE→yfinance ticker remap** — renamed tickers (e.g. `ZOMATO`→`ETERNAL`)
   no longer silently drop the price/trend signals.
 - [x] **Source pruning (signal over volume)** — based on a live-run source audit:
-  - **Screener disabled** — it scraped each company's *entire* document history
-    (old concall transcripts / presentations) and stamped all 354 items as
-    "now" = fake-fresh noise, and concalls aren't intraday catalysts anyway.
+  - **Screener repurposed** — disabled as a *news/catalyst* collector (it
+    scraped each company's entire document history and stamped all 354 items
+    "now" = fake-fresh noise). Instead it now serves as a **fundamentals
+    enrichment** provider: for each candidate it fetches market cap + annual
+    revenue (cached, once per symbol), which the liquidity gate and order-win
+    materiality depend on — both were previously running on `None`/placeholder
+    values. See `app/market_data/fundamentals.py`.
+  - **Funnel visibility** — the pipeline now logs the candidate tier breakdown
+    and the fresh/priced-in split, so it's clear how a large article haul
+    narrows to a short actionable watchlist.
   - **Investing.com disabled** — mostly macro/global/forex; low NSE-catalyst
     value and the main source of junk thematic matches.
   - **Brokerage Radar queries simplified** — the old heavy boolean/`site:`

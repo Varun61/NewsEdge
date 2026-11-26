@@ -113,6 +113,43 @@ class NewsClassifier:
                 fallback = fallback or ctx
         return fallback
 
+    @staticmethod
+    def _mcap_category(mcap_cr: float):
+        from app.database.models import MarketCapCategory
+        if mcap_cr >= 20_000:
+            return MarketCapCategory.LARGE_CAP
+        if mcap_cr >= 5_000:
+            return MarketCapCategory.MID_CAP
+        if mcap_cr >= 1_000:
+            return MarketCapCategory.SMALL_CAP
+        return MarketCapCategory.MICRO_CAP
+
+    def _enrich_company_fundamentals(self, company, session) -> None:
+        """Populate market cap + annual revenue from Screener for a candidate.
+
+        Fetched once per symbol and persisted, so later runs skip it. Market cap
+        drives the liquidity gate; revenue drives order-win materiality. Both
+        were previously missing/placeholder, quietly breaking those gates.
+        """
+        if company is None or company.market_cap is not None:
+            return
+        try:
+            from app.market_data.fundamentals import get_fundamentals_provider
+            f = get_fundamentals_provider().get(company.nse_symbol)
+            if not f:
+                return
+            if f.market_cap_cr:
+                company.market_cap = f.market_cap_cr
+                company.market_cap_category = self._mcap_category(f.market_cap_cr)
+            if f.revenue_cr and (not company.annual_revenue or company.annual_revenue in (5000.0, 10000.0)):
+                company.annual_revenue = f.revenue_cr
+            logger.info(
+                "Enriched %s: market_cap=%s Cr, revenue=%s Cr",
+                company.nse_symbol, f.market_cap_cr, f.revenue_cr,
+            )
+        except Exception as exc:
+            logger.debug("Fundamentals enrichment skipped for %s: %s", getattr(company, "nse_symbol", "?"), exc)
+
     def _resolve_filing_company(self, session, symbol, isin, name):
         """Resolve/create the Company for an authoritative filing. The symbol is
         exchange-provided, so it is definitively NSE-listed — no grounding check."""
@@ -195,6 +232,7 @@ class NewsClassifier:
         if not resolved:
             return None
         event.primary_company_id = resolved.id
+        self._enrich_company_fundamentals(resolved, session)
 
         classification = self._classification_from_catalyst(
             ctx["catalyst"], resolved.nse_symbol, resolved.company_name, source_urls
@@ -499,6 +537,10 @@ class NewsClassifier:
                 # General commentary without identifiable entity
                 event.is_processed = True
                 return None
+
+        # Enrich fundamentals (market cap + revenue) so materiality and the
+        # liquidity gate operate on real figures, not placeholders.
+        self._enrich_company_fundamentals(event.primary_company, session)
 
         # Materiality Analysis
         mat_score, mat_explanation = self.materiality.analyze(event, classification, session)
