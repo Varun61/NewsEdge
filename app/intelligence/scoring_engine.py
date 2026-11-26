@@ -104,6 +104,119 @@ class ScoringEngine:
         else:
             return 50.0
 
+    def _contextual_signals(
+        self, event, event_symbol, direction, is_positive, is_negative, company
+    ) -> Dict[str, float]:
+        """Collect optional, independent contextual signals into a modifier map.
+
+        Each evaluator (sector momentum, technical trend, concall tone, bulk/
+        block deals, promoter pledge, delivery/volume, tradeable liquidity) is
+        best-effort: a failure in one never blocks the others or the score.
+        """
+        signals: Dict[str, float] = {}
+
+        # ── SECTOR MOMENTUM CONTEXT ───────────────────────────────────────
+        try:
+            from app.intelligence.sector_momentum import get_sector_momentum_analyzer
+            momentum_analyzer = get_sector_momentum_analyzer()
+            if event_symbol:
+                sector_mod = momentum_analyzer.get_sector_modifier(event_symbol)
+                if sector_mod < 0:
+                    signals["sector_headwind"] = sector_mod
+                elif sector_mod > 0 and is_positive:
+                    signals["sector_tailwind"] = sector_mod
+        except Exception:
+            pass  # Sector momentum is optional; continue without it
+
+        # ── TECHNICAL TREND CONTEXT ───────────────────────────────────────
+        try:
+            from app.intelligence.technical_trend import get_technical_trend_analyzer
+            trend_analyzer = get_technical_trend_analyzer()
+            if event_symbol:
+                trend_eval = trend_analyzer.get_trend_evaluation(event_symbol, direction)
+                if trend_eval:
+                    if trend_eval.score_modifier < 0:
+                        signals["technical_counter_trend"] = trend_eval.score_modifier
+                    elif trend_eval.score_modifier > 0 and is_positive:
+                        signals["technical_uptrend_tailwind"] = trend_eval.score_modifier
+        except Exception:
+            pass
+
+        # ── CONCALL COMMENTARY ALIGNMENT ──────────────────────────────────
+        try:
+            from app.intelligence.concall_analyzer import get_concall_analyzer
+            concall_analyzer = get_concall_analyzer()
+            full_c_text = f"{event.primary_headline} {event.news_summary or ''}"
+            concall_eval = concall_analyzer.analyze_text(full_c_text)
+            if concall_eval.score_modifier < 0:
+                signals["concall_headwind"] = concall_eval.score_modifier
+            elif concall_eval.score_modifier > 0 and is_positive:
+                signals["concall_tailwind"] = concall_eval.score_modifier
+        except Exception:
+            pass
+
+        # ── BULK & BLOCK DEALS CORRELATION ────────────────────────────────
+        try:
+            from app.intelligence.bulk_deals_analyzer import get_bulk_deals_analyzer
+            bulk_analyzer = get_bulk_deals_analyzer()
+            full_b_text = f"{event.primary_headline} {event.news_summary or ''}"
+            deal_eval = bulk_analyzer.evaluate_deal(event.primary_headline, full_b_text)
+            if deal_eval.is_promoter_selling:
+                signals["bulk_deals_promoter_dump"] = deal_eval.score_modifier
+            elif deal_eval.is_institutional_buying and is_positive:
+                signals["bulk_deals_marquee_buyer"] = deal_eval.score_modifier
+        except Exception:
+            pass
+
+        # ── PROMOTER PLEDGE & SHAREHOLDING HEALTH ─────────────────────────
+        try:
+            from app.intelligence.shareholding_analyzer import get_shareholding_analyzer
+            share_analyzer = get_shareholding_analyzer()
+            full_s_text = f"{event.primary_headline} {event.news_summary or ''}"
+            if event_symbol:
+                share_eval = share_analyzer.evaluate_health(event_symbol, full_s_text)
+                if share_eval.is_high_pledge:
+                    signals["high_promoter_pledge"] = share_eval.score_modifier
+                elif share_eval.is_promoter_selling:
+                    signals["promoter_stake_dilution"] = share_eval.score_modifier
+                elif share_eval.is_institutional_inflow and is_positive:
+                    signals["institutional_stake_inflow"] = share_eval.score_modifier
+        except Exception:
+            pass
+
+        # ── DELIVERY & VOLUME CONVICTION (NSE bhavcopy) ───────────────────
+        try:
+            from app.market_data.bhavcopy import get_bhavcopy_provider
+            if event_symbol:
+                mkt = get_bhavcopy_provider().metrics(event_symbol)
+                if mkt:
+                    if (is_positive or is_negative) and mkt.delivery_pct >= 65.0 and mkt.relative_volume >= 1.5:
+                        signals["delivery_volume_conviction"] = +6.0
+                    elif mkt.relative_volume and mkt.relative_volume < 0.5:
+                        signals["thin_volume_participation"] = -4.0
+        except Exception:
+            pass
+
+        # ── TRADEABLE LIQUIDITY GATE ──────────────────────────────────────
+        try:
+            from app.intelligence.liquidity_gate import evaluate_liquidity
+            if event_symbol:
+                mcap_cat = None
+                mcap_cr = None
+                if company is not None:
+                    if getattr(company, "market_cap_category", None) is not None:
+                        mcap_cat = company.market_cap_category.value
+                    mcap_cr = getattr(company, "market_cap", None)
+                liq = evaluate_liquidity(event_symbol, mcap_cat, mcap_cr)
+                if not liq.is_tradeable:
+                    signals["illiquid_untradeable"] = liq.score_modifier
+                elif liq.score_modifier < 0:
+                    signals[f"liquidity_{liq.tier.lower()}"] = liq.score_modifier
+        except Exception:
+            pass
+
+        return signals
+
     def score_event(
         self,
         event: NewsEvent,
@@ -360,110 +473,12 @@ class ScoringEngine:
         if any(re.search(pat, headline_lower) for pat in cautious_tone_patterns):
             penalties["management_caution_tone"] = -14.0
 
-        # ── SECTOR MOMENTUM CONTEXT ───────────────────────────────────────
-        try:
-            from app.intelligence.sector_momentum import get_sector_momentum_analyzer
-            momentum_analyzer = get_sector_momentum_analyzer()
-            if event_symbol:
-                sector_mod = momentum_analyzer.get_sector_modifier(event_symbol)
-                if sector_mod < 0:
-                    penalties["sector_headwind"] = sector_mod
-                elif sector_mod > 0 and is_positive:
-                    # Sector tailwind only helps bullish setups
-                    penalties["sector_tailwind"] = sector_mod
-        except Exception:
-            pass  # Sector momentum is optional; continue without it
-
-        # ── TECHNICAL TREND CONTEXT ───────────────────────────────────────
-        try:
-            from app.intelligence.technical_trend import get_technical_trend_analyzer
-            trend_analyzer = get_technical_trend_analyzer()
-            if event_symbol:
-                trend_eval = trend_analyzer.get_trend_evaluation(event_symbol, direction)
-                if trend_eval:
-                    if trend_eval.score_modifier < 0:
-                        penalties["technical_counter_trend"] = trend_eval.score_modifier
-                    elif trend_eval.score_modifier > 0 and is_positive:
-                        penalties["technical_uptrend_tailwind"] = trend_eval.score_modifier
-        except Exception:
-            pass
-
-        # ── CONCALL COMMENTARY ALIGNMENT ──────────────────────────────────
-        try:
-            from app.intelligence.concall_analyzer import get_concall_analyzer
-            concall_analyzer = get_concall_analyzer()
-            full_c_text = f"{event.primary_headline} {event.news_summary or ''}"
-            concall_eval = concall_analyzer.analyze_text(full_c_text)
-            if concall_eval.score_modifier < 0:
-                penalties["concall_headwind"] = concall_eval.score_modifier
-            elif concall_eval.score_modifier > 0 and is_positive:
-                penalties["concall_tailwind"] = concall_eval.score_modifier
-        except Exception:
-            pass
-
-        # ── BULK & BLOCK DEALS CORRELATION ────────────────────────────────
-        try:
-            from app.intelligence.bulk_deals_analyzer import get_bulk_deals_analyzer
-            bulk_analyzer = get_bulk_deals_analyzer()
-            full_b_text = f"{event.primary_headline} {event.news_summary or ''}"
-            deal_eval = bulk_analyzer.evaluate_deal(event.primary_headline, full_b_text)
-            if deal_eval.is_promoter_selling:
-                penalties["bulk_deals_promoter_dump"] = deal_eval.score_modifier
-            elif deal_eval.is_institutional_buying and is_positive:
-                penalties["bulk_deals_marquee_buyer"] = deal_eval.score_modifier
-        except Exception:
-            pass
-
-        # ── PROMOTER PLEDGE & SHAREHOLDING HEALTH ─────────────────────────
-        try:
-            from app.intelligence.shareholding_analyzer import get_shareholding_analyzer
-            share_analyzer = get_shareholding_analyzer()
-            full_s_text = f"{event.primary_headline} {event.news_summary or ''}"
-            if event_symbol:
-                share_eval = share_analyzer.evaluate_health(event_symbol, full_s_text)
-                if share_eval.is_high_pledge:
-                    penalties["high_promoter_pledge"] = share_eval.score_modifier
-                elif share_eval.is_promoter_selling:
-                    penalties["promoter_stake_dilution"] = share_eval.score_modifier
-                elif share_eval.is_institutional_inflow and is_positive:
-                    penalties["institutional_stake_inflow"] = share_eval.score_modifier
-        except Exception:
-            pass
-
-        # ── DELIVERY & VOLUME CONVICTION (NSE bhavcopy) ───────────────────
-        # High delivery % + high relative volume on a directional catalyst =
-        # genuine institutional participation. A thin, low-delivery move fades.
-        try:
-            from app.market_data.bhavcopy import get_bhavcopy_provider
-            if event_symbol:
-                mkt = get_bhavcopy_provider().metrics(event_symbol)
-                if mkt:
-                    if (is_positive or is_negative) and mkt.delivery_pct >= 65.0 and mkt.relative_volume >= 1.5:
-                        penalties["delivery_volume_conviction"] = +6.0
-                    elif mkt.relative_volume and mkt.relative_volume < 0.5:
-                        penalties["thin_volume_participation"] = -4.0
-        except Exception:
-            pass
-
-        # ── TRADEABLE LIQUIDITY GATE ──────────────────────────────────────
-        # A next-morning pick is only useful if it can actually be traded at the
-        # open. Thin names are penalised; micro-caps are gated to WATCH_ONLY.
-        try:
-            from app.intelligence.liquidity_gate import evaluate_liquidity
-            if event_symbol:
-                mcap_cat = None
-                mcap_cr = None
-                if company is not None:
-                    if getattr(company, "market_cap_category", None) is not None:
-                        mcap_cat = company.market_cap_category.value
-                    mcap_cr = getattr(company, "market_cap", None)
-                liq = evaluate_liquidity(event_symbol, mcap_cat, mcap_cr)
-                if not liq.is_tradeable:
-                    penalties["illiquid_untradeable"] = liq.score_modifier
-                elif liq.score_modifier < 0:
-                    penalties[f"liquidity_{liq.tier.lower()}"] = liq.score_modifier
-        except Exception:
-            pass
+        # ── Contextual signals (sector, trend, concall, bulk/block deals,
+        #    promoter pledge, delivery/volume, liquidity). Each is an optional,
+        #    independent evaluator; see _contextual_signals. ────────────────
+        penalties.update(
+            self._contextual_signals(event, event_symbol, direction, is_positive, is_negative, company)
+        )
 
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 

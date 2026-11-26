@@ -160,6 +160,13 @@ gracefully (per-collector try/except), so a down endpoint never breaks a run.
   watchlist, FDA firm→symbol map) via `app/processors/reference_data.py`. Edit
   the JSON to tune behaviour with no code change; a missing/bad file falls back
   to the in-code default so a gate never silently empties.
+- [x] **Scoring decomposition (part 1)** — the 7 contextual evaluators (sector
+  momentum, technical trend, concall tone, bulk/block deals, promoter pledge,
+  delivery/volume, liquidity) were extracted out of the `score_event`
+  God-method into a dedicated `_contextual_signals()` that returns a signal map.
+  ~90 lines removed from the method; each evaluator is independent and
+  best-effort. (Remaining: extract the pure regex-penalty block — best done
+  with the test runner live.)
 - [x] **Scoring policy centralised** (`app/intelligence/scoring_policy.py`): the
   tier cutoffs and penalty-override thresholds that were scattered as ~20 inline
   literals across `score_event` (and duplicated in the old backtest) now live in
