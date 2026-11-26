@@ -418,6 +418,21 @@ class ScoringEngine:
         except Exception:
             pass
 
+        # ── DELIVERY & VOLUME CONVICTION (NSE bhavcopy) ───────────────────
+        # High delivery % + high relative volume on a directional catalyst =
+        # genuine institutional participation. A thin, low-delivery move fades.
+        try:
+            from app.market_data.bhavcopy import get_bhavcopy_provider
+            if event_symbol:
+                mkt = get_bhavcopy_provider().metrics(event_symbol)
+                if mkt:
+                    if (is_positive or is_negative) and mkt.delivery_pct >= 65.0 and mkt.relative_volume >= 1.5:
+                        penalties["delivery_volume_conviction"] = +6.0
+                    elif mkt.relative_volume and mkt.relative_volume < 0.5:
+                        penalties["thin_volume_participation"] = -4.0
+        except Exception:
+            pass
+
         # ── TRADEABLE LIQUIDITY GATE ──────────────────────────────────────
         # A next-morning pick is only useful if it can actually be traded at the
         # open. Thin names are penalised; micro-caps are gated to WATCH_ONLY.

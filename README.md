@@ -128,6 +128,16 @@ gracefully (per-collector try/except), so a down endpoint never breaks a run.
   `symbol: category/direction conf/impact -> score [tier]` so classifications
   are auditable.
 
+**Architecture improvements (in progress)**
+
+- [x] **Market-data layer — NSE bhavcopy** (`app/market_data/bhavcopy.py`): one
+  daily `sec_bhavdata_full` download covers the whole cash universe (verified:
+  3,451 symbols) with OHLC, volume, and **delivery %**. Disk-cached, lazily
+  loaded. Adds a **delivery + relative-volume conviction signal** to scoring
+  (high delivery % + high relative volume on a directional catalyst = real
+  institutional participation; thin low-delivery moves are penalised). Pure
+  parser offline-tested against the real file.
+
 **Endpoints verified live (27 Nov 2026):** NSE redirects `.com`→`.in` (the HTTP
 client follows it automatically). Confirmed working: corporate-announcements
 (ISIN is field `sm_isin`), `historicalOR/bulk-block-short-deals` for bulk/block
