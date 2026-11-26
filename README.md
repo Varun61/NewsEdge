@@ -130,6 +130,12 @@ gracefully (per-collector try/except), so a down endpoint never breaks a run.
 
 **Architecture improvements (in progress)**
 
+- [x] **End-to-end pipeline test** (`tests/test_pipeline_integration.py`) — over
+  a real temp-SQLite DB, no network: collect→normalize→deduplicate preserves
+  authoritative filing identity and maps the right company; and an authoritative
+  bullish order-win filing flows through classify→score (fast-path) into a
+  bullish actionable `StockAnalysis` (network analyzers monkeypatched to
+  neutral). Fills the gap where only unit-level tests existed.
 - [x] **Market-data layer — NSE bhavcopy** (`app/market_data/bhavcopy.py`): one
   daily `sec_bhavdata_full` download covers the whole cash universe (verified:
   3,451 symbols) with OHLC, volume, and **delivery %**. Disk-cached, lazily
