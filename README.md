@@ -138,6 +138,11 @@ gracefully (per-collector try/except), so a down endpoint never breaks a run.
   institutional participation; thin low-delivery moves are penalised). Pure
   parser offline-tested against the real file.
 
+- [x] **Curated lists externalised** to `data/reference/*.json` (F&O universe,
+  institutional bellwethers, marquee buyers, promoter/PE sellers, high-pledge
+  watchlist, FDA firm→symbol map) via `app/processors/reference_data.py`. Edit
+  the JSON to tune behaviour with no code change; a missing/bad file falls back
+  to the in-code default so a gate never silently empties.
 - [x] **Scoring policy centralised** (`app/intelligence/scoring_policy.py`): the
   tier cutoffs and penalty-override thresholds that were scattered as ~20 inline
   literals across `score_event` (and duplicated in the old backtest) now live in

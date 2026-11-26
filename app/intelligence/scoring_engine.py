@@ -29,6 +29,7 @@ from app.database.models import (
 from app.database.repository import Repository
 from app.intelligence.ai_provider import ClassificationResult
 from app.processors.nse_master import ALIAS_STOPWORDS
+from app.processors.reference_data import load_set
 
 logger = logging.getLogger("newsedge.intelligence.scoring")
 
@@ -58,6 +59,9 @@ INSTITUTIONAL_BELLWETHERS = {
     "BHARTIARTL", "ASIANPAINT", "TITAN", "PIDILITIND", "BERGEPAINT",
     "HAVELLS", "VOLTAS", "SIEMENS", "ABB", "TRENT",
 }
+# Externalised: data/reference/institutional_bellwethers.json overrides the
+# in-code default above when present.
+INSTITUTIONAL_BELLWETHERS = load_set("institutional_bellwethers", INSTITUTIONAL_BELLWETHERS)
 
 
 class ScoringEngine:

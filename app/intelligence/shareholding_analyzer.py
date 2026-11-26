@@ -27,6 +27,9 @@ HIGH_PLEDGE_WATCHLIST = {
     "SUZLON": 25.0,
     "SPARC": 32.0,
 }
+# Externalised: data/reference/high_pledge_watchlist.json overrides the default.
+from app.processors.reference_data import load_dict as _load_dict
+HIGH_PLEDGE_WATCHLIST = _load_dict("high_pledge_watchlist", HIGH_PLEDGE_WATCHLIST)
 
 
 @dataclass

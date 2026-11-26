@@ -43,6 +43,9 @@ NSE_FNO_UNIVERSE: Set[str] = {
     "TORNTPHARM", "TORNTPOWER", "TRENT", "TVSMOTOR", "UBL", "ULTRACEMCO", "UPL",
     "VEDL", "VOLTAS", "WIPRO", "ZEEL", "ZYDUSLIFE"
 }
+# Externalised: data/reference/fno_universe.json overrides the default when present.
+from app.processors.reference_data import load_set as _load_set
+NSE_FNO_UNIVERSE = _load_set("fno_universe", NSE_FNO_UNIVERSE)
 
 
 @dataclass

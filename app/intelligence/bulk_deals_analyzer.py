@@ -35,6 +35,12 @@ PROMOTER_PE_SELLERS = [
     "block deal at discount", "ofs at discount", "dilutes stake", "offloads stake"
 ]
 
+# Externalised: data/reference/{marquee_buyers,promoter_pe_sellers}.json override
+# the in-code defaults above when present.
+from app.processors.reference_data import load_list as _load_list
+MARQUEE_BUYERS = _load_list("marquee_buyers", MARQUEE_BUYERS)
+PROMOTER_PE_SELLERS = _load_list("promoter_pe_sellers", PROMOTER_PE_SELLERS)
+
 
 @dataclass
 class BlockDealEvaluation:

@@ -49,6 +49,9 @@ _FIRM_TO_SYMBOL = {
     "aarti": "AARTIDRUGS",
     "hetero": None,  # unlisted; recognised but skipped
 }
+# Externalised: data/reference/fda_firm_symbol_map.json overrides the default.
+from app.processors.reference_data import load_dict as _load_dict
+_FIRM_TO_SYMBOL = _load_dict("fda_firm_symbol_map", _FIRM_TO_SYMBOL)
 
 
 def map_fda_firm_to_symbol(firm: str) -> Optional[str]:
