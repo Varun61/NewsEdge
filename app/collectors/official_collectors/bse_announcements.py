@@ -105,7 +105,7 @@ class BSEAnnouncementCollector(BaseCollector):
             try:
                 resp = session.get(_API, params=params, timeout=self.timeout_seconds)
                 if resp.status_code != 200:
-                    logger.debug("BSE page %d -> HTTP %d", pageno, resp.status_code)
+                    logger.warning("BSE page %d -> HTTP %d", pageno, resp.status_code)
                     break
                 data = resp.json()
             except (requests.RequestException, ValueError) as exc:
