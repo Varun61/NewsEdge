@@ -62,14 +62,20 @@ def build_default_registry() -> CollectorRegistry:
     registry.register(FinancialExpressCollector(enabled=True))
     registry.register(CNBCTV18Collector(enabled=True))
     registry.register(ZerodhaPulseCollector(enabled=True))
-    registry.register(InvestingComCollector(enabled=True))
+    # Investing.com disabled: feed is mostly macro/global/forex noise with low
+    # NSE stock-specific catalyst value and is a source of junk thematic matches.
+    registry.register(InvestingComCollector(enabled=False))
 
     # High-precision earnings, concall, and financial results sources
     registry.register(TijoriFinanceCollector(enabled=True))
     registry.register(MarketByteCollector(enabled=True))
     registry.register(MoneycontrolResultsCollector(enabled=True))
     registry.register(TheCoreEarningsCollector(enabled=True))
-    registry.register(ScreenerCollector(enabled=True))
+    # Screener disabled: it scraped each company's ENTIRE document history
+    # (past concall transcripts / presentations) and stamped every item as
+    # "now", flooding the pool with fake-fresh, non-intraday-catalyst noise
+    # (354 items in a single run). Authoritative filings now come from NSE/BSE.
+    registry.register(ScreenerCollector(enabled=False))
     registry.register(BrokerageRadarCollector(enabled=True))
 
     # Official exchange announcements (authoritative filings, with redundancy:

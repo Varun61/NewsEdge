@@ -21,10 +21,13 @@ from app.processors.nse_master import clean_headline_publisher
 
 logger = logging.getLogger("newsedge.collectors.brokerage_radar")
 
+# Keep queries SIMPLE: Google News RSS returns nothing for heavy boolean/site:
+# queries (the previous complex queries silently yielded 0 results every run).
 BROKERAGE_QUERIES = [
-    'brokerage radar OR "maintains buy" OR "raises target" OR "cuts target" site:moneycontrol.com',
-    '"target price" OR "upgrade to buy" OR "downgrade to sell" site:economictimes.indiatimes.com',
-    'brokerage calls "Jefferies" OR "CLSA" OR "Morgan Stanley" OR "Goldman Sachs" OR "Nomura" NSE',
+    "brokerage target price stock",
+    "brokerage upgrade downgrade stock",
+    "Jefferies CLSA Nomura Morgan Stanley target price",
+    "Motilal Oswal Kotak target price stock",
 ]
 
 

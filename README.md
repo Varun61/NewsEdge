@@ -71,6 +71,16 @@ Run it with: `python -m scripts.backtest_filings --days 30`
   confidently. If NSE is unreachable, BSE keeps the filings-first path alive.
 - [x] **NSE→yfinance ticker remap** — renamed tickers (e.g. `ZOMATO`→`ETERNAL`)
   no longer silently drop the price/trend signals.
+- [x] **Source pruning (signal over volume)** — based on a live-run source audit:
+  - **Screener disabled** — it scraped each company's *entire* document history
+    (old concall transcripts / presentations) and stamped all 354 items as
+    "now" = fake-fresh noise, and concalls aren't intraday catalysts anyway.
+  - **Investing.com disabled** — mostly macro/global/forex; low NSE-catalyst
+    value and the main source of junk thematic matches.
+  - **Brokerage Radar queries simplified** — the old heavy boolean/`site:`
+    queries returned 0 every run; brokerage upgrades/downgrades are real
+    intraday catalysts, so the queries are now simple enough for Google News
+    RSS to actually return results.
 
 > **Note on performance claims below:** the empirical backtest numbers in this
 > README predate the rework and are being re-validated with a corrected,
