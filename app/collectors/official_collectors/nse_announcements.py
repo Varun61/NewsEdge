@@ -1,34 +1,40 @@
-"""NSE corporate announcements collector.
+"""NSE corporate announcements collector (filings-first, authoritative).
 
-Fetches official exchange filings and corporate announcements directly from the
-National Stock Exchange of India (NSE) official corporate announcements API.
+Fetches official exchange filings directly from the National Stock Exchange of
+India (NSE) corporate-announcements API. This is the authoritative, fastest
+catalyst source for a post-market / pre-open watchlist: results, order wins,
+SEBI orders, resignations and board outcomes are filed here before the news
+wires rewrite them.
+
+Improvements over the naive version:
+- Cookie-primed session (NSE rejects un-primed API calls with 401/403).
+- Explicit from/to date window so only filings inside the run window are kept.
+- Captures the authoritative symbol + ISIN (no downstream re-guessing).
+- Parses the exchange's own filing category into a structured catalyst with
+  extracted numbers via :mod:`app.processors.filing_catalyst`.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import List, Optional
 
-import requests
+import pytz
 
 from app.collectors.base_collector import BaseCollector, CollectedArticle
+from app.collectors.official_collectors.nse_session import fetch_nse_json
+from app.processors.filing_catalyst import classify_filing
 
 logger = logging.getLogger("newsedge.collectors.nse")
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    ),
-    "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-announcements",
-}
+_IST = pytz.timezone("Asia/Kolkata")
+_WARMUP = ("/companies-listing/corporate-filings-announcements",)
 
 
 class NSEAnnouncementCollector(BaseCollector):
-    """Collector for National Stock Exchange (NSE) Official Corporate Disclosures."""
+    """Collector for NSE official corporate disclosures (filings-first)."""
 
     def __init__(
         self,
@@ -44,64 +50,74 @@ class NSEAnnouncementCollector(BaseCollector):
             credibility_score=credibility_score,
         )
         self.timeout_seconds = timeout_seconds
-        self.api_url = "https://www.nseindia.com/api/corporate-announcements?index=equities"
+
+    def _api_url(self, since: datetime, until: datetime) -> str:
+        """Build the equities announcements API URL for the given UTC window.
+
+        NSE expects dates as DD-MM-YYYY in IST.
+        """
+        start_ist = since.astimezone(_IST)
+        end_ist = until.astimezone(_IST)
+        frm = start_ist.strftime("%d-%m-%Y")
+        to = end_ist.strftime("%d-%m-%Y")
+        return (
+            "https://www.nseindia.com/api/corporate-announcements"
+            f"?index=equities&from_date={frm}&to_date={to}"
+        )
+
+    @staticmethod
+    def _parse_pub_dt(item: dict) -> datetime:
+        """Parse the filing timestamp (IST) into UTC, tolerant of field names."""
+        raw = item.get("sort_date") or item.get("an_dt") or item.get("exchdisstime") or ""
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%d-%b-%Y %H:%M:%S", "%d-%b-%Y %H:%M"):
+            try:
+                dt_naive = datetime.strptime(raw.strip(), fmt)
+                return _IST.localize(dt_naive).astimezone(timezone.utc)
+            except (ValueError, AttributeError):
+                continue
+        return datetime.now(timezone.utc)
 
     def collect(self, since: datetime, until: datetime) -> List[CollectedArticle]:
         if not self.enabled:
             return []
 
         logger.info("Collecting official filings from NSE Corporate Announcements API...")
-        articles: List[CollectedArticle] = []
-
-        try:
-            session = requests.Session()
-            session.headers.update(HEADERS)
-            # Fetch announcements directly
-            resp = session.get(self.api_url, timeout=self.timeout_seconds)
-
-            if resp.status_code != 200:
-                logger.warning("NSE Announcements API returned HTTP %d", resp.status_code)
-                return []
-
-            data = resp.json()
-            if not isinstance(data, list):
-                logger.warning("Unexpected response format from NSE API")
-                return []
-
-        except Exception as exc:
-            logger.error("Failed to fetch NSE Announcements: %s", exc)
+        data = fetch_nse_json(
+            self._api_url(since, until),
+            warmup_paths=_WARMUP,
+            timeout=self.timeout_seconds,
+        )
+        if not isinstance(data, list):
+            logger.warning("NSE Announcements returned no usable data (primed fetch failed or empty).")
             return []
 
+        articles: List[CollectedArticle] = []
         for item in data:
-            symbol = item.get("symbol", "")
-            comp_name = item.get("sm_name", symbol)
-            desc = item.get("desc", "")
-            voice_summary = item.get("voiceSummary", "")
-            att_file = item.get("attchmntFile", "")
-            att_text = item.get("attchmntText", "")
-            sort_date_str = item.get("sort_date", "")
+            symbol = (item.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
 
-            # Parse date (NSE sort_date is in IST: "YYYY-MM-DD HH:MM:SS")
-            pub_dt = None
-            if sort_date_str:
-                try:
-                    import pytz
-                    ist_tz = pytz.timezone("Asia/Kolkata")
-                    dt_naive = datetime.strptime(sort_date_str, "%Y-%m-%d %H:%M:%S")
-                    pub_dt = ist_tz.localize(dt_naive).astimezone(timezone.utc)
-                except Exception:
-                    pub_dt = datetime.now(timezone.utc)
-            else:
-                pub_dt = datetime.now(timezone.utc)
+            comp_name = (item.get("sm_name") or item.get("companyName") or symbol).strip()
+            isin = (item.get("isin") or "").strip() or None
+            # NSE field names vary: `desc` is the category/subject, `attchmntText`
+            # (and sometimes `smIndustry`/`bdp_descriptor`) carry detail.
+            subject = (item.get("desc") or item.get("bdp_descriptor") or "").strip()
+            detail = (item.get("attchmntText") or item.get("voiceSummary") or "").strip()
+            att_file = (item.get("attchmntFile") or "").strip()
 
-            # Build headline
-            headline = f"{symbol} ({comp_name}): {desc}"
-            if voice_summary:
-                first_sentence = voice_summary.split(".")[0].strip()
-                if len(first_sentence) > 20:
-                    headline = f"{symbol} ({comp_name}): {first_sentence}"
+            pub_dt = self._parse_pub_dt(item)
 
-            content = voice_summary or att_text or desc
+            # Window guard (the API range param is day-granular; enforce exact bounds).
+            if pub_dt < since or pub_dt > until:
+                continue
+
+            catalyst = classify_filing(subject=subject, description=subject, attachment_text=detail)
+
+            # Build a clean, information-dense headline.
+            headline_core = detail.split(".")[0].strip() if detail and len(detail.split(".")[0]) > 20 else subject
+            headline = f"{symbol} ({comp_name}): {headline_core}".strip()
+
+            content = detail or subject
             url = att_file or f"https://www.nseindia.com/get-quotes/equity?symbol={symbol}"
 
             articles.append(
@@ -112,10 +128,18 @@ class NSEAnnouncementCollector(BaseCollector):
                     published_at=pub_dt,
                     raw_content=content,
                     extracted_text=content,
-                    company_mentions=[comp_name, symbol],
+                    company_mentions=[symbol, comp_name],
                     credibility_score=self.credibility_score,
+                    authoritative_symbol=symbol,
+                    authoritative_isin=isin,
+                    filing_catalyst=asdict(catalyst),
                 )
             )
 
-        logger.info("NSE Announcements collector retrieved %d official filings", len(articles))
+        materials = sum(1 for a in articles if (a.filing_catalyst or {}).get("is_material"))
+        logger.info(
+            "NSE Announcements: %d filings in window (%d material catalysts).",
+            len(articles),
+            materials,
+        )
         return articles

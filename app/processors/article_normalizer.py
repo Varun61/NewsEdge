@@ -60,6 +60,16 @@ class ArticleNormalizer:
                 credibility_score=collected.credibility_score,
             )
 
+        # Preserve authoritative exchange-filing identity + parsed catalyst so the
+        # downstream classifier can trust it instead of re-guessing from the text.
+        mentions_payload: dict = {"mentions": collected.company_mentions}
+        if collected.authoritative_symbol:
+            mentions_payload["authoritative_symbol"] = collected.authoritative_symbol
+        if collected.authoritative_isin:
+            mentions_payload["authoritative_isin"] = collected.authoritative_isin
+        if collected.filing_catalyst:
+            mentions_payload["filing_catalyst"] = collected.filing_catalyst
+
         now = datetime.now(timezone.utc)
         article = Repository.create_article(
             session=session,
@@ -71,7 +81,7 @@ class ArticleNormalizer:
             updated_at=now,
             raw_content=collected.raw_content,
             extracted_text=collected.extracted_text or collected.raw_content,
-            company_mentions={"mentions": collected.company_mentions},
+            company_mentions=mentions_payload,
             source_credibility=source.credibility_score,
             content_hash=content_hash,
             collection_status=CollectionStatus.COLLECTED,

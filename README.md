@@ -14,6 +14,41 @@ It scans overnight, post-market, and pre-market corporate announcements, regulat
 
 ---
 
+## 🚧 Active Rework: Filings-First Catalyst Engine (in progress)
+
+NewsEdge is being re-architected from a **news-headline-driven** watchlist into a
+**filings-first, next-day intraday stock picker**. The design target is the real
+workflow: run once after market close, pick for tomorrow's open.
+
+**Why:** by the time a catalyst is a clean news headline, the move is largely
+priced in. The authoritative, fastest catalyst in India is the **NSE/BSE
+corporate-announcement feed** (results, order wins, SEBI orders, resignations),
+which is filed *before* the wires rewrite it. News is now treated as
+corroboration, not the primary signal.
+
+**Rework progress**
+
+- [x] **Filing catalyst parser** (`app/processors/filing_catalyst.py`) — maps an
+  exchange filing's own category into a structured catalyst (direction, impact,
+  extracted ₹-value / YoY% / penalty), with noise gating. Offline unit-tested.
+- [x] **Cookie-primed NSE session** (`app/collectors/official_collectors/nse_session.py`)
+  — fixes the silent 401 that previously made the NSE collector return nothing.
+- [x] **Rewritten NSE announcements collector** — date-windowed, captures the
+  authoritative symbol + ISIN (no downstream re-guessing), attaches the parsed
+  catalyst.
+- [ ] Classifier trusts filing catalysts over headline heuristics.
+- [ ] Source-priority ranking + tradeable-liquidity gate.
+- [ ] Methodologically correct backtest + honest performance reporting.
+
+> **Note on performance claims below:** the empirical backtest numbers in this
+> README predate the rework and are being re-validated with a corrected,
+> cost-aware, bias-controlled backtest. Treat them as provisional until the
+> rework's backtest section lands.
+
+See the git log on `feature/filings-first-catalyst-engine` for per-increment detail.
+
+---
+
 ## 🌟 Key Capabilities
 
 ### 1. 17 Multi-Source Financial Collectors

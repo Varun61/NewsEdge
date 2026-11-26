@@ -24,6 +24,20 @@ class CollectedArticle:
     company_mentions: list[str] = field(default_factory=list)
     credibility_score: float = 0.5
 
+    # ── Authoritative identity (exchange filings only) ──────────────────────
+    # When a collector knows the exact listed entity (e.g. an NSE/BSE filing
+    # carries the symbol and ISIN), it sets these so downstream resolution does
+    # NOT re-guess the company from free text.
+    authoritative_symbol: Optional[str] = None
+    authoritative_isin: Optional[str] = None
+    # Structured catalyst interpretation (see processors.filing_catalyst).
+    # Stored as a plain dict so it round-trips through JSON persistence.
+    filing_catalyst: Optional[dict] = None
+
+    @property
+    def is_official_filing(self) -> bool:
+        return self.authoritative_symbol is not None
+
     @property
     def content_hash(self) -> str:
         """SHA-256 hash of normalized headline and url for deduplication."""
