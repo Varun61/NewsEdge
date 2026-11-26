@@ -134,6 +134,11 @@ _STALE_RECAP_PATTERNS = [
     r"\byear in review\b",
     r"\bin charts?\b",
     r"\bf&o\s+(?:cues|strategy)\b",
+    r"\bdecoded\b",
+    r"\bwhat it means\b",
+    r"\bhere'?s what\b",
+    r"^explained\b",
+    r"\bcan\s+\w+(?:\s+\w+){0,5}\s+(?:power|deliver|sustain|revive|drive|rally|turn around|justify)\b",
 ]
 _STALE_RECAP_RE = [re.compile(p, re.IGNORECASE) for p in _STALE_RECAP_PATTERNS]
 
@@ -142,8 +147,11 @@ def is_stale_recap(headline: str) -> bool:
     """True if the headline is an evergreen recap/preview/analysis/listicle — a
     *recently published article about an old or not-yet-occurred event*, which
     must not be treated as a fresh next-day catalyst (e.g. "TCS results review:
-    should you buy?" long after the actual results)."""
-    h = headline or ""
+    should you buy?" long after the actual results, or "Why is X falling?")."""
+    h = (headline or "").strip()
+    # A question-headline is opinion/analysis, not a hard catalyst.
+    if h.endswith("?"):
+        return True
     return any(rx.search(h) for rx in _STALE_RECAP_RE)
 
 

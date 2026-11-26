@@ -408,6 +408,9 @@ class ScoringEngine:
         elif "stale_largecap_earnings_unconfirmed" in penalties:
             # Likely a weeks-old bellwether earnings re-report (no filing / results source)
             candidate_class = _watch(final_score)
+        elif "order_book_not_new_order" in penalties:
+            # Cumulative order book / backlog commentary — not a fresh order win
+            candidate_class = _watch(final_score)
         elif "body_only_mention" in penalties and final_score < p.override_body_only:
             # Company was not in the headline; avoid recommending body passing mentions as high conviction trades
             candidate_class = _watch(final_score)

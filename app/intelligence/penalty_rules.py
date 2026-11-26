@@ -109,6 +109,13 @@ def compute_headline_penalties(ctx: PenaltyContext) -> Dict[str, float]:
         if not has_rupee_amount:
             penalties["unquantified_order_win"] = -12.0
 
+    # "Order book"/backlog/pipeline is a CUMULATIVE figure (analysis), not a fresh
+    # order win catalyst (e.g. "Can X's ₹47,000cr order book power growth?").
+    if any(k in headline_lower for k in ("order book", "orderbook", "order backlog", "order pipeline")) and not any(
+        v in headline_lower for v in ("bags", "wins", "secures", "receives", "awarded", "bagged", "new order")
+    ):
+        penalties["order_book_not_new_order"] = -12.0
+
     # Negative forward guidance / concall headwinds
     negative_guidance_patterns = [
         r"\bguidance\s+(?:cut|lowered|slashed|reduced|downgraded)",

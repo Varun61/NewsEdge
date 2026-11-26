@@ -139,6 +139,14 @@ gracefully (per-collector try/except), so a down endpoint never breaks a run.
 - [x] **NSE client-hint headers** — added `sec-ch-ua*` / `Sec-Fetch-*` to the
   primed session; their absence triggers Akamai's empty-body bot challenge on
   some networks even after cookie priming.
+- [x] **Thematic foreign-entity guard** — a headline dominated by a foreign
+  entity with no India anchor (e.g. "SpaceX gets FCC nod", "Why is SanDisk
+  falling?") is no longer projected onto an Indian sector basket (was mapping to
+  NETWEB). Whole-token matching avoids substring false hits.
+- [x] **Analysis-as-catalyst guard** — question-headlines ("Why is X falling?",
+  "Can X power growth?") and `order book`/backlog commentary (a cumulative
+  figure, not a fresh order win) are gated to WATCH-only instead of becoming
+  strong-bullish catalysts.
 
 - [x] **Undated RSS items dropped** — an entry with no parseable publish date
   used to bypass the window filter and leak in as "fresh" (`published_at=None`

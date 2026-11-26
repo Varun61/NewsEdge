@@ -351,6 +351,40 @@ SECTOR_THEMATIC_RULES: List[SectorRule] = [
 ]
 
 
+# Headlines dominated by a foreign entity with no India linkage must NOT be
+# mapped onto an Indian sector basket (e.g. "SpaceX gets FCC nod" -> NETWEB).
+_FOREIGN_MARKERS = (
+    "spacex", "sandisk", "nvidia", "micron", "amd", "tesla", "microsoft", "openai",
+    "starmind", "fcc", "nasa", "wall street", "nasdaq", "dow jones", "s&p 500",
+    "chinese", "beijing", "federal reserve", " fed ", "boeing", "samsung", "tsmc",
+    "elon musk", "alphabet", "meta platforms", "u.s.", "u.s ", "us fed",
+)
+_INDIA_ANCHORS = (
+    "india", "indian", "nse", "bse", "sebi", "rbi", "reserve bank", "nifty",
+    "sensex", "crore", "lakh", "rupee", "₹", "modi", "government of india",
+    "union cabinet", "ministry", "dalal street", "make in india", "pli", "gst",
+    "mumbai", "new delhi", "bengaluru",
+)
+
+
+def _contains_any(text: str, terms) -> bool:
+    """Whole-token membership test (avoids substring false hits like 'rbi' in
+    'orbital' or 'pli' in 'compliance')."""
+    for t in terms:
+        if re.search(r"(?<![a-z0-9])" + re.escape(t) + r"(?![a-z0-9])", text):
+            return True
+    return False
+
+
+def _is_foreign_centric(headline: str, combined: str) -> bool:
+    """True if a foreign entity dominates the headline and there is no India anchor
+    anywhere in the text — such news should not map to Indian beneficiaries."""
+    h = (headline or "").lower()
+    if not _contains_any(h, _FOREIGN_MARKERS):
+        return False
+    return not _contains_any(combined, _INDIA_ANCHORS)
+
+
 class ThematicEngine:
     """Detects sector-wide catalysts and maps impact across Large, Mid, Small, and Micro-cap stocks."""
 
@@ -433,6 +467,12 @@ class ThematicEngine:
         """
         combined = f"{headline} {text[:400]}".lower()
         impacts: List[ThematicImpact] = []
+
+        # Guard: foreign-centric news (SpaceX/SanDisk/etc. with no India anchor)
+        # must not be projected onto an Indian sector basket.
+        if _is_foreign_centric(headline, combined):
+            logger.debug("Skipping thematic mapping for foreign-centric headline: %s", headline[:70])
+            return impacts
 
         for rule in self.rules:
             # Skip false matches on administrative/processing fee reductions for insurance commission rule

@@ -17,6 +17,14 @@ def test_stale_recap_allows_fresh_catalyst():
     assert not is_stale_recap("Infosys Q2 net profit rises 12% YoY to Rs 6,500 crore")
 
 
+def test_stale_recap_question_and_analysis_headlines():
+    assert is_stale_recap("Why is SanDisk stock falling despite surging profits?")
+    assert is_stale_recap("Can Siemens data centre push power its next leg of growth?")
+    assert is_stale_recap("Explained: What the new F&O rules mean for traders")
+    # A plain factual catalyst (no '?', no analysis markers) stays actionable
+    assert not is_stale_recap("Siemens bags Rs 5,000 crore metro order")
+
+
 def test_grounded_quantified_official_boosts():
     # Stock named in headline, hard number, authoritative source.
     c = calibrate_confidence(70, source_credibility=1.0, headline="LT bags ₹4,000 crore order", symbol="LT")

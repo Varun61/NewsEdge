@@ -23,6 +23,15 @@ def test_unquantified_vs_quantified_order():
         ctx("ABC bags order worth Rs 2,000 crore", cat_str="ORDER_WIN", symbol="ABC"))
 
 
+def test_order_book_is_not_a_fresh_order():
+    p = compute_headline_penalties(
+        ctx("Can Siemens's Rs 47,000 crore order book power its growth", cat_str="ORDER_WIN", symbol="SIEMENS"))
+    assert "order_book_not_new_order" in p
+    # A genuine fresh order (with an action verb) is not flagged
+    assert "order_book_not_new_order" not in compute_headline_penalties(
+        ctx("Siemens bags Rs 5,000 crore metro order", cat_str="ORDER_WIN", symbol="SIEMENS"))
+
+
 def test_margin_compression():
     assert "margin_compression" in compute_headline_penalties(
         ctx("XYZ Q2 margins contract on input costs", symbol="XYZ"))
