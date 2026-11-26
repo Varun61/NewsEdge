@@ -138,6 +138,12 @@ gracefully (per-collector try/except), so a down endpoint never breaks a run.
   institutional participation; thin low-delivery moves are penalised). Pure
   parser offline-tested against the real file.
 
+- [x] **Scoring policy centralised** (`app/intelligence/scoring_policy.py`): the
+  tier cutoffs and penalty-override thresholds that were scattered as ~20 inline
+  literals across `score_event` (and duplicated in the old backtest) now live in
+  one `ScoringPolicy` dataclass. Behaviour-preserving extraction; the engine is
+  now tunable from one place and the magic numbers are named and documented.
+
 **Endpoints verified live (27 Nov 2026):** NSE redirects `.com`→`.in` (the HTTP
 client follows it automatically). Confirmed working: corporate-announcements
 (ISIN is field `sm_isin`), `historicalOR/bulk-block-short-deals` for bulk/block

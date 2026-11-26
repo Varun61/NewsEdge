@@ -63,9 +63,11 @@ INSTITUTIONAL_BELLWETHERS = {
 class ScoringEngine:
     """Calculates overall 0-100 score and assigns candidate priority."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, policy: Optional["ScoringPolicy"] = None):
         self.settings = settings
-        self.version = "1.2"
+        self.version = "1.3"
+        from app.intelligence.scoring_policy import DEFAULT_POLICY
+        self.policy = policy or DEFAULT_POLICY
 
     def _calculate_freshness_score(self, event_time: Optional[datetime]) -> float:
         """Exponential decay based on age in hours."""
@@ -456,7 +458,7 @@ class ScoringEngine:
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 
         # 5. Hard minimum-confidence gate — if we can't verify the company, exclude from watchlist
-        if classification.confidence < 52.0 and final_score < 72.0:
+        if classification.confidence < self.policy.min_confidence and final_score < self.policy.min_confidence_score:
             candidate_class = CandidateClassification.EXCLUDED
             analysis = Repository.create_analysis(
                 session=session,
@@ -480,72 +482,74 @@ class ScoringEngine:
             )
             return analysis
 
-        # 6. Determine Classification Priority (tighter thresholds for actionable tiers)
+        # 6. Determine Classification Priority (thresholds centralised in ScoringPolicy)
+        p = self.policy
+        CC = CandidateClassification
+
+        def _watch(score: float) -> CandidateClassification:
+            return CC.WATCH_ONLY if score >= p.watch_cutoff else CC.EXCLUDED
+
         mat_str = (event.financial_materiality or "").strip()
         is_thematic_secondary = mat_str.startswith("[") and "]" in mat_str
 
         if is_thematic_secondary:
             # Secondary basket picks from sector themes are sympathy tracking items, not primary trade recommendations
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+            candidate_class = _watch(final_score)
         elif "illiquid_untradeable" in penalties:
             # Micro-cap: too thin for a reliable intraday fill — tracking only, never actionable
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+            candidate_class = _watch(final_score)
         elif "routine_calendar_event" in penalties:
             # Ex-dividend lists and general calendar updates belong in Watch Only
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
-        elif "body_only_mention" in penalties and final_score < 86.0:
+            candidate_class = _watch(final_score)
+        elif "body_only_mention" in penalties and final_score < p.override_body_only:
             # Company was not in the headline; avoid recommending body passing mentions as high conviction trades
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+            candidate_class = _watch(final_score)
         elif cat_str in ("BUSINESS_UPDATE", "OTHER"):
             # Routine commentary and generic updates never qualify for Bullish/Bearish trade watchlists
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+            candidate_class = _watch(final_score)
         elif cat_str == "CAPACITY_EXPANSION" and not any(kw in headline_lower for kw in ["bags order", "wins contract", "commissions", "inaugurates"]):
             # Uncommissioned long-gestation capex lacks next-day velocity — keep as WATCH_ONLY
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
-        elif cat_str == "BUYBACK" and final_score < 78.0:
+            candidate_class = _watch(final_score)
+        elif cat_str == "BUYBACK" and final_score < p.override_buyback:
             # Routine buybacks without high conviction tend to be sell-on-news
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+            candidate_class = _watch(final_score)
         elif "margin_compression" in penalties or "negative_forward_guidance" in penalties or "management_caution_tone" in penalties:
             # Margin erosion, guidance cut, or cautious management tone invalidates bullish trade thesis
             if is_negative or "negative_forward_guidance" in penalties:
-                candidate_class = CandidateClassification.BEARISH if final_score >= 60.0 else CandidateClassification.WATCH_ONLY
+                candidate_class = CC.BEARISH if final_score >= p.bearish_cutoff else CC.WATCH_ONLY
             else:
-                candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
-        elif "unquantified_order_win" in penalties and final_score < 78.0:
+                candidate_class = _watch(final_score)
+        elif "unquantified_order_win" in penalties and final_score < p.override_unquantified_order:
             # Orders without numeric value cannot be modeled by institutions — keep in WATCH_ONLY
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
-        elif ("subpar_growth_deceleration" in penalties or "largecap_modest_growth" in penalties or "revenue_profit_divergence" in penalties or "exceptional_items_inflation" in penalties) and final_score < 78.0:
+            candidate_class = _watch(final_score)
+        elif ("subpar_growth_deceleration" in penalties or "largecap_modest_growth" in penalties or "revenue_profit_divergence" in penalties or "exceptional_items_inflation" in penalties) and final_score < p.override_growth_quality:
             # Growth deceleration, bellwether modest growth, or accounting quality issues → WATCH_ONLY
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
-        elif "technical_counter_trend" in penalties and is_positive and final_score < 80.0:
+            candidate_class = _watch(final_score)
+        elif "technical_counter_trend" in penalties and is_positive and final_score < p.override_counter_trend:
             # Stock is in structural downtrend (Price < 20 EMA and 50 EMA) - avoid counter-trend trap
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+            candidate_class = _watch(final_score)
         elif "bulk_deals_promoter_dump" in penalties:
             # Promoter or PE stake offload creates massive supply overhang
-            candidate_class = CandidateClassification.BEARISH if final_score >= 60.0 else CandidateClassification.WATCH_ONLY
-        elif "high_promoter_pledge" in penalties and is_positive and final_score < 82.0:
+            candidate_class = CC.BEARISH if final_score >= p.bearish_cutoff else CC.WATCH_ONLY
+        elif "high_promoter_pledge" in penalties and is_positive and final_score < p.override_high_pledge:
             # Toxic pledge risk gates stock out of bullish actionable recommendations
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+            candidate_class = _watch(final_score)
         elif is_negative:
-            if final_score >= 78.0:
-                candidate_class = CandidateClassification.STRONG_BEARISH
-            elif final_score >= 60.0:
-                candidate_class = CandidateClassification.BEARISH
-            elif final_score >= 46.0:
-                candidate_class = CandidateClassification.WATCH_ONLY
+            if final_score >= p.strong_cutoff:
+                candidate_class = CC.STRONG_BEARISH
+            elif final_score >= p.bearish_cutoff:
+                candidate_class = CC.BEARISH
             else:
-                candidate_class = CandidateClassification.EXCLUDED
+                candidate_class = _watch(final_score)
         elif "bullish" in direction or classification.sentiment in ("VERY_POSITIVE", "POSITIVE"):
-            if final_score >= 78.0:
-                candidate_class = CandidateClassification.STRONG_BULLISH
-            elif final_score >= 64.0:
-                candidate_class = CandidateClassification.BULLISH
-            elif final_score >= 46.0:
-                candidate_class = CandidateClassification.WATCH_ONLY
+            if final_score >= p.strong_cutoff:
+                candidate_class = CC.STRONG_BULLISH
+            elif final_score >= p.bullish_cutoff:
+                candidate_class = CC.BULLISH
             else:
-                candidate_class = CandidateClassification.EXCLUDED
+                candidate_class = _watch(final_score)
         else:
-            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+            candidate_class = _watch(final_score)
 
         analysis = Repository.create_analysis(
             session=session,
