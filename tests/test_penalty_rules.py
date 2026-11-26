@@ -29,11 +29,13 @@ def test_margin_compression():
 
 
 def test_past_price_action_exhaustion():
-    # Uses the "percent" spelling which the (reproduced) original regex matches.
     assert "past_price_action_exhaustion" in compute_headline_penalties(
         ctx("PQR shares rally 18 percent in trade", symbol="PQR"))
     assert "past_price_action_exhaustion" in compute_headline_penalties(
         ctx("PQR stock hits 52-week high", symbol="PQR"))
+    # Regression: "surge 18%" (percent sign + space) is now caught too.
+    assert "past_price_action_exhaustion" in compute_headline_penalties(
+        ctx("PQR shares surge 18% in trade", symbol="PQR"))
 
 
 def test_stale_recap_penalty():

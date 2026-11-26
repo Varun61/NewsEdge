@@ -57,11 +57,13 @@ def compute_headline_penalties(ctx: PenaltyContext) -> Dict[str, float]:
         penalties["buyback_sell_on_news"] = -8.0
 
     # Backward-looking past price action report (exhausted momentum)
+    # Note: use ``\d+\s*%`` (not ``\d+%\b``) — a percent sign followed by a space
+    # has no word boundary, so the old ``\d+%\b`` silently missed "surge 18%".
     past_surge_patterns = [
-        r"\b(?:shares|stock)\b.*\b(?:surge\w*|skyrocket\w*|rally\w*|rallied|jump\w*|jumped|gain\w*|gained|soar\w*)\b.*\b(?:\d+%\b|\d+\s*percent)",
-        r"\b(?:rallies|surges|jumps|zooms|skyrockets)\b\s+(?:whopping\s+)?(?:\d+%\b|\d+\s*percent)",
+        r"\b(?:shares|stock)\b.*\b(?:surge\w*|skyrocket\w*|rally\w*|rallied|jump\w*|jumped|gain\w*|gained|soar\w*)\b.*(?:\d+\s*%|\d+\s*percent)",
+        r"\b(?:rallies|surges|jumps|zooms|skyrockets)\b\s+(?:whopping\s+)?(?:\d+\s*%|\d+\s*percent)",
         r"\b(?:hits|hit|touches|scaled)\b.*\b(?:52-week high|record high|all-time high|new high)\b",
-        r"\bup\s+(?:\d+%\b|\d+\s*percent)\s+(?:since|in\s+\d+|from\s+ipo)",
+        r"\bup\s+(?:\d+\s*%|\d+\s*percent)\s+(?:since|in\s+\d+|from\s+ipo)",
     ]
     is_past_price_report = any(bool(re.search(pat, headline_lower)) for pat in past_surge_patterns)
     if is_past_price_report and not any(kw in headline_lower for kw in ["bags order", "wins contract", "secures order", "awarded"]):
