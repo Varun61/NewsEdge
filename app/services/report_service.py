@@ -79,6 +79,16 @@ class ReportService:
         # Rank candidates by overall score descending
         analyses.sort(key=lambda a: a.overall_score, reverse=True)
 
+        # Funnel visibility: how many candidates land in each tier. Explains how
+        # a large article haul narrows to a short actionable watchlist.
+        from collections import Counter
+        tier_counts = Counter(a.classification.value for a in analyses)
+        logger.info(
+            "Candidate tier breakdown (%d scored): %s",
+            len(analyses),
+            ", ".join(f"{k}={v}" for k, v in sorted(tier_counts.items())) or "none",
+        )
+
         for rank, a in enumerate(analyses, 1):
             Repository.add_watchlist_item(
                 session=self.session,

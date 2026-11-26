@@ -179,6 +179,14 @@ class TelegramFormatter:
                         break
             return result
 
+        logger.info(
+            "Watchlist split: actionable bull=%d bear=%d (of %d shown-eligible) | "
+            "fresh_bull=%d priced_bull=%d fresh_bear=%d priced_bear=%d",
+            len(all_bullish), len(all_bearish), len(analyses),
+            len(fresh_bullish_raw), len(priced_bullish_raw),
+            len(fresh_bearish_raw), len(priced_bearish_raw),
+        )
+
         # Fresh lists first (higher priority), then priced-in
         top_fresh_bullish = _dedupe_top(fresh_bullish_raw, 10)
         top_fresh_bearish = _dedupe_top(fresh_bearish_raw, 10)
