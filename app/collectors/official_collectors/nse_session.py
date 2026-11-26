@@ -51,7 +51,18 @@ def _prime(session: requests.Session, warmup_paths: tuple[str, ...], timeout: in
     """Visit NSE pages to collect cookies. Returns True if any cookies were set."""
     try:
         session.get(_HOME_URL, timeout=timeout)
-        time.sleep(0.4)
+        time.sleep(0.5)
+        # A lightweight JSON API warms the bot-protection (bm_sv / nseappid) cookies
+        # that the heavier endpoints require.
+        try:
+            session.get(
+                f"{_HOME_URL}/api/marketStatus",
+                timeout=timeout,
+                headers={"Accept": "application/json, text/plain, */*", "Referer": _HOME_URL},
+            )
+            time.sleep(0.3)
+        except requests.RequestException:
+            pass
         for path in warmup_paths:
             try:
                 session.get(f"{_HOME_URL}{path}", timeout=timeout)
@@ -95,23 +106,40 @@ def fetch_nse_json(
 
     Returns the parsed JSON, or ``None`` on failure.
     """
+    # NSE's JSON APIs reject requests that lack a matching Referer and the
+    # XHR marker; without them the body comes back empty (-> "Expecting value").
+    referer = f"{_HOME_URL}{warmup_paths[0]}" if warmup_paths else _HOME_URL
+    api_headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Referer": referer,
+        "X-Requested-With": "XMLHttpRequest",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+    }
+
     last_exc: Optional[Exception] = None
     for attempt in range(retries + 1):
         session = get_nse_session(warmup_paths, timeout, force_refresh=(attempt > 0))
         try:
-            resp = session.get(url, timeout=timeout, headers={"Accept": "application/json"})
-            if resp.status_code == 200:
+            resp = session.get(url, timeout=timeout, headers=api_headers)
+            body = (resp.text or "").strip()
+            if resp.status_code == 200 and body and body[0] in "{[":
                 try:
                     return resp.json()
                 except ValueError as exc:
                     last_exc = exc
                     logger.debug("NSE returned non-JSON for %s (attempt %d)", url, attempt + 1)
+            elif resp.status_code == 200:
+                # 200 with an empty/HTML body = bot-protection challenge; re-prime.
+                last_exc = ValueError("empty or non-JSON body (bot challenge)")
+                logger.debug("NSE %s -> 200 but empty/HTML body (attempt %d)", url, attempt + 1)
             else:
                 logger.debug("NSE %s -> HTTP %d (attempt %d)", url, resp.status_code, attempt + 1)
         except requests.RequestException as exc:
             last_exc = exc
             logger.debug("NSE request error for %s: %s (attempt %d)", url, exc, attempt + 1)
-        time.sleep(0.6)
+        time.sleep(1.0)
     if last_exc:
         logger.warning("NSE JSON fetch failed for %s: %s", url, last_exc)
     return None
