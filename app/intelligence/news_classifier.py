@@ -84,6 +84,149 @@ class NewsClassifier:
         self.materiality = materiality_analyzer or MaterialityAnalyzer()
         self._resolver = get_nse_resolver()
 
+    # ── Filings-first fast-path helpers ─────────────────────────────────
+    def _get_filing_context(self, event: NewsEvent) -> Optional[dict]:
+        """Return authoritative filing context if any linked article is an
+        official exchange filing (symbol + parsed catalyst). Prefers the
+        primary-linked filing."""
+        fallback: Optional[dict] = None
+        for link in event.article_links:
+            art = link.article
+            if not art or not isinstance(art.company_mentions, dict):
+                continue
+            cm = art.company_mentions
+            sym = cm.get("authoritative_symbol")
+            cat = cm.get("filing_catalyst")
+            if sym and isinstance(cat, dict):
+                name = None
+                mentions = cm.get("mentions")
+                if isinstance(mentions, list) and len(mentions) >= 2:
+                    name = mentions[1]
+                ctx = {
+                    "symbol": sym,
+                    "isin": cm.get("authoritative_isin"),
+                    "name": name,
+                    "catalyst": cat,
+                }
+                if link.is_primary:
+                    return ctx
+                fallback = fallback or ctx
+        return fallback
+
+    def _resolve_filing_company(self, session, symbol, isin, name):
+        """Resolve/create the Company for an authoritative filing. The symbol is
+        exchange-provided, so it is definitively NSE-listed — no grounding check."""
+        symbol = (symbol or "").upper().strip()
+        if not symbol:
+            return None
+        resolved = Repository.get_company_by_symbol(session, symbol)
+        if not resolved and isin:
+            resolved = Repository.get_company_by_isin(session, isin)
+        if resolved:
+            if isin and not resolved.isin:
+                resolved.isin = isin
+            return resolved
+        info = self._resolver.get_company_info(symbol) or {}
+        official_name = info.get("name") or name or symbol
+        kwargs = dict(
+            nse_symbol=symbol,
+            company_name=official_name,
+            is_active=True,
+            sector=info.get("sector", "Diversified"),
+            industry=info.get("industry", "Diversified"),
+            annual_revenue=info.get("revenue", 5000.0),
+        )
+        if isin:
+            kwargs["isin"] = isin
+        try:
+            resolved = Repository.create_company(session, **kwargs)
+            session.flush()
+            return resolved
+        except Exception as exc:
+            logger.warning("Could not register filing company %s: %s", symbol, exc)
+            return None
+
+    @staticmethod
+    def _classification_from_catalyst(catalyst: dict, symbol: str, name: str, source_urls: list) -> ClassificationResult:
+        """Build a ClassificationResult from an exchange-parsed filing catalyst."""
+        direction = (catalyst.get("direction") or "neutral").lower()
+        impact = float(catalyst.get("impact_hint", 50.0))
+        confidence = float(catalyst.get("confidence", 85.0))
+        category = catalyst.get("news_category") or "OTHER"
+
+        if direction == "bullish":
+            sentiment = "VERY_POSITIVE" if impact >= 78.0 else "POSITIVE"
+        elif direction == "bearish":
+            sentiment = "VERY_NEGATIVE" if impact >= 78.0 else "NEGATIVE"
+        else:
+            sentiment = "NEUTRAL"
+
+        summary = (catalyst.get("summary") or "").strip()
+        bits = []
+        if catalyst.get("order_value_cr"):
+            bits.append(f"order ₹{catalyst['order_value_cr']:,.0f} Cr")
+        if catalyst.get("profit_growth_pct") is not None:
+            bits.append(f"profit {catalyst['profit_growth_pct']:+.0f}% YoY")
+        if catalyst.get("revenue_growth_pct") is not None:
+            bits.append(f"revenue {catalyst['revenue_growth_pct']:+.0f}% YoY")
+        if catalyst.get("penalty_amount_cr"):
+            bits.append(f"penalty ₹{catalyst['penalty_amount_cr']:,.0f} Cr")
+        materiality = summary + ((" | " + ", ".join(bits)) if bits else "")
+
+        return ClassificationResult(
+            company_name=name,
+            nse_symbol=symbol,
+            news_category=category,
+            sentiment=sentiment,
+            impact_score=round(impact, 1),
+            confidence=round(confidence, 1),
+            financial_materiality=materiality or "Official exchange filing.",
+            expected_direction=direction,
+            time_horizon="intraday",
+            news_summary=summary or "Official exchange filing",
+            reasoning=f"Official NSE filing ({catalyst.get('matched_rule', 'filing')}); exchange-categorised catalyst.",
+            risks=["Gap-open exhaustion", "Broader market regime"],
+            source_urls=source_urls,
+        )
+
+    def _process_filing_event(self, event, ctx, source_urls, session):
+        """Classify + score an event straight from its authoritative filing."""
+        resolved = self._resolve_filing_company(session, ctx["symbol"], ctx.get("isin"), ctx.get("name"))
+        if not resolved:
+            return None
+        event.primary_company_id = resolved.id
+
+        classification = self._classification_from_catalyst(
+            ctx["catalyst"], resolved.nse_symbol, resolved.company_name, source_urls
+        )
+
+        mat_score, mat_explanation = self.materiality.analyze(event, classification, session)
+
+        try:
+            event.news_category = NewsCategory(classification.news_category)
+        except ValueError:
+            event.news_category = NewsCategory.OTHER
+        try:
+            event.sentiment = Sentiment(classification.sentiment)
+        except ValueError:
+            event.sentiment = Sentiment.NEUTRAL
+        event.impact_score = classification.impact_score
+        event.confidence = classification.confidence
+        event.financial_materiality = mat_explanation
+        event.expected_direction = classification.expected_direction
+        event.time_horizon = classification.time_horizon
+        event.news_summary = classification.news_summary
+        event.reasoning = classification.reasoning
+        event.risks = classification.risks
+        event.is_processed = True
+
+        logger.info(
+            "Event #%d classified from official NSE filing: %s (%s) [%s/%s]",
+            event.id, resolved.company_name, resolved.nse_symbol,
+            classification.news_category, classification.expected_direction,
+        )
+        return self.scoring.score_event(event, classification, mat_score, session)
+
     def process_event(
         self,
         event: NewsEvent,
@@ -102,6 +245,17 @@ class NewsClassifier:
             for link in event.article_links
             if link.article
         )
+
+        # ── Filings-first fast-path ──────────────────────────────────────
+        # If this event carries an authoritative exchange filing, trust the
+        # exchange's own catalyst categorisation instead of re-guessing the
+        # company and catalyst from free text.
+        filing_ctx = self._get_filing_context(event)
+        if filing_ctx and (filing_ctx.get("catalyst") or {}).get("is_material"):
+            filing_analysis = self._process_filing_event(event, filing_ctx, source_urls, session)
+            if filing_analysis is not None:
+                return filing_analysis
+            # Could not resolve the filing company; fall through to standard path.
 
         # Pre-resolve company using NSEStockResolver if missing
         if symbol == "UNKNOWN" or not event.primary_company_id:

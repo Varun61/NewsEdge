@@ -36,7 +36,10 @@ corroboration, not the primary signal.
 - [x] **Rewritten NSE announcements collector** — date-windowed, captures the
   authoritative symbol + ISIN (no downstream re-guessing), attaches the parsed
   catalyst.
-- [ ] Classifier trusts filing catalysts over headline heuristics.
+- [x] **Classifier trusts filing catalysts** — when an event carries an
+  authoritative filing, the classifier resolves the company from the filing's
+  own symbol/ISIN and scores it from the exchange-categorised catalyst instead
+  of re-guessing from headline regex.
 - [ ] Source-priority ranking + tradeable-liquidity gate.
 - [ ] Methodologically correct backtest + honest performance reporting.
 
