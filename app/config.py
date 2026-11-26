@@ -18,6 +18,7 @@ class AIProvider(str, Enum):
 class MarketDataProvider(str, Enum):
     """Supported market-data providers."""
     NONE = "none"
+    ANGEL = "angel"
 
 
 class Settings(BaseSettings):
@@ -66,6 +67,12 @@ class Settings(BaseSettings):
 
     # ── Market data ─────────────────────────────────────────────────────
     market_data_provider: MarketDataProvider = MarketDataProvider.NONE
+
+    # ── Angel One SmartAPI ───────────────────────────────────────────────
+    angel_api_key: Optional[str] = None
+    angel_client_id: Optional[str] = None
+    angel_password: Optional[str] = None
+    angel_totp_secret: Optional[str] = None
 
     # ── Scoring weights (must sum to 100) ───────────────────────────────
     weight_news_impact: float = 25.0
