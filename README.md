@@ -46,10 +46,15 @@ corroboration, not the primary signal.
   watchlist never surfaces a stock you can't realistically fill at the open.
   (Source priority is already emergent: filings carry top credibility, so the
   deduplicator makes the filing primary and the classifier keys off it.)
-- [ ] Methodologically correct backtest + honest performance reporting. The
-  current `scripts/backtest_one_month.py` has its own duplicated pipeline that
-  bypasses the collectors and the filings-first classifier, so it does **not**
-  yet reflect these changes.
+- [ ] Methodologically correct backtest + honest performance reporting.
+  - [x] **Evaluation core** (`app/backtesting/trade_model.py`) — realistic fills
+    (enter at next open, not prev close), round-trip costs (brokerage + STT +
+    slippage), benchmark-relative excess return, and Wilson confidence intervals
+    on the win rate. 12 offline tests.
+  - [ ] Orchestrator that drives it from the **real** classifier (the current
+    `scripts/backtest_one_month.py` runs a duplicated pipeline that bypasses the
+    collectors and the filings-first classifier, so it does **not** reflect
+    these changes).
 
 > **Note on performance claims below:** the empirical backtest numbers in this
 > README predate the rework and are being re-validated with a corrected,
