@@ -94,10 +94,12 @@ class RSSCollector(BaseCollector):
                 continue
 
             pub_date = self._parse_published_date(entry)
-            if pub_date:
-                # Filter strictly by window
-                if pub_date < since or pub_date > until:
-                    continue
+            # An item we cannot place in time must NOT be treated as fresh in a
+            # next-day picker — a missing date previously leaked in as "now".
+            if pub_date is None:
+                continue
+            if pub_date < since or pub_date > until:
+                continue
 
             summary = getattr(entry, "summary", "") or getattr(entry, "description", "")
             extracted = summary

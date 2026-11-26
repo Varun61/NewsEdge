@@ -1,6 +1,20 @@
 """Tests for objective confidence calibration (pure/offline)."""
 
-from app.intelligence.ai_provider import calibrate_confidence
+from app.intelligence.ai_provider import calibrate_confidence, is_stale_recap
+
+
+def test_stale_recap_detects_preview_and_review():
+    assert is_stale_recap("TCS Q2 results review: should you buy the stock?")
+    assert is_stale_recap("Infosys earnings preview: what to expect")
+    assert is_stale_recap("Top 5 stocks to watch today")
+    assert is_stale_recap("IT stocks in focus ahead of Q2 results")
+    assert is_stale_recap("Reliance share price: key takeaways from AGM")
+
+
+def test_stale_recap_allows_fresh_catalyst():
+    assert not is_stale_recap("L&T bags Rs 4,000 crore order from NHAI")
+    assert not is_stale_recap("SEBI imposes Rs 25 crore penalty on XYZ")
+    assert not is_stale_recap("Infosys Q2 net profit rises 12% YoY to Rs 6,500 crore")
 
 
 def test_grounded_quantified_official_boosts():

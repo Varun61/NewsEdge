@@ -27,7 +27,7 @@ from app.database.models import (
     StockAnalysis,
 )
 from app.database.repository import Repository
-from app.intelligence.ai_provider import ClassificationResult
+from app.intelligence.ai_provider import ClassificationResult, is_stale_recap
 from app.processors.nse_master import ALIAS_STOPWORDS
 from app.processors.reference_data import load_set
 
@@ -283,6 +283,12 @@ class ScoringEngine:
         if any(re.search(pat, headline_lower) for pat in routine_calendar_patterns):
             penalties["routine_calendar_event"] = -15.0
 
+        # Evergreen recap / preview / "should you buy" / "in focus" articles are a
+        # fresh article about an OLD or not-yet-occurred event — not a fresh
+        # catalyst (e.g. a TCS Q2 "results review" published weeks after results).
+        if is_stale_recap(event.primary_headline or ""):
+            penalties["stale_or_recap_reference"] = -14.0
+
         # Entity headline verification: ensure headline actually names the company/symbol
         company = event.primary_company
         event_symbol = company.nse_symbol if company else ""
@@ -504,6 +510,9 @@ class ScoringEngine:
             candidate_class = _watch(final_score)
         elif "routine_calendar_event" in penalties:
             # Ex-dividend lists and general calendar updates belong in Watch Only
+            candidate_class = _watch(final_score)
+        elif "stale_or_recap_reference" in penalties:
+            # Recap/preview/analysis of an old or future event — track, don't trade
             candidate_class = _watch(final_score)
         elif "body_only_mention" in penalties and final_score < p.override_body_only:
             # Company was not in the headline; avoid recommending body passing mentions as high conviction trades

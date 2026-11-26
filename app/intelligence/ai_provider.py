@@ -118,6 +118,35 @@ _SPECULATIVE_MARKERS = (
 _QUANT_RE = re.compile(r"(?:₹|rs\.?|inr|usd|\$)\s*[\d,]+|\b\d+(?:\.\d+)?\s*%|\b\d[\d,]*\s*(?:crore|cr|lakh|million|billion|mn|bn)\b", re.IGNORECASE)
 
 
+_STALE_RECAP_PATTERNS = [
+    r"\bwhat to expect\b",
+    r"\bshould you (?:buy|sell|hold|invest)\b",
+    r"\bresults?\s+preview\b",
+    r"\bq[1-4]\s+preview\b",
+    r"\bearnings\s+preview\b",
+    r"\bahead of (?:q[1-4]|results|earnings|the results)\b",
+    r"\bresults?\s+(?:review|recap|analysis|reaction)\b",
+    r"\b(?:stocks?|shares?)\s+(?:to watch|in focus)\b",
+    r"\btop\s+(?:pick|picks|buy|bets?|stocks?)\b",
+    r"\bthings to know\b",
+    r"\bkey takeaways\b",
+    r"\bdeep dive\b",
+    r"\byear in review\b",
+    r"\bin charts?\b",
+    r"\bf&o\s+(?:cues|strategy)\b",
+]
+_STALE_RECAP_RE = [re.compile(p, re.IGNORECASE) for p in _STALE_RECAP_PATTERNS]
+
+
+def is_stale_recap(headline: str) -> bool:
+    """True if the headline is an evergreen recap/preview/analysis/listicle — a
+    *recently published article about an old or not-yet-occurred event*, which
+    must not be treated as a fresh next-day catalyst (e.g. "TCS results review:
+    should you buy?" long after the actual results)."""
+    h = headline or ""
+    return any(rx.search(h) for rx in _STALE_RECAP_RE)
+
+
 def calibrate_confidence(llm_confidence: float, source_credibility: float, headline: str, symbol: str) -> float:
     """Recompute classification confidence from OBJECTIVE signals instead of
     trusting a small model's self-reported number.

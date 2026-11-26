@@ -128,6 +128,17 @@ gracefully (per-collector try/except), so a down endpoint never breaks a run.
   `symbol: category/direction conf/impact -> score [tier]` so classifications
   are auditable.
 
+**Stale-news fixes (article recency ≠ catalyst recency)**
+
+- [x] **Undated RSS items dropped** — an entry with no parseable publish date
+  used to bypass the window filter and leak in as "fresh" (`published_at=None`
+  → treated as now). For a next-day picker, items that can't be placed in time
+  are now skipped.
+- [x] **Recap/preview detector** (`is_stale_recap`) — a *recently published*
+  article about an *old or not-yet-occurred* event ("TCS Q2 results review:
+  should you buy?", "stocks in focus ahead of results", "top 5 picks") is no
+  longer treated as a fresh catalyst; it's penalised and routed to WATCH-only.
+
 **Architecture improvements (in progress)**
 
 - [x] **End-to-end pipeline test** (`tests/test_pipeline_integration.py`) — over
