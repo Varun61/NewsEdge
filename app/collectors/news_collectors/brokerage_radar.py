@@ -28,6 +28,7 @@ BROKERAGE_QUERIES = [
     "brokerage upgrade downgrade stock",
     "Jefferies CLSA Nomura Morgan Stanley target price",
     "Motilal Oswal Kotak target price stock",
+    "moneycontrol brokerage radar",
 ]
 
 

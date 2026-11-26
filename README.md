@@ -82,6 +82,27 @@ Run it with: `python -m scripts.backtest_filings --days 30`
   - **Funnel visibility** — the pipeline now logs the candidate tier breakdown
     and the fresh/priced-in split, so it's clear how a large article haul
     narrows to a short actionable watchlist.
+
+**New authoritative catalyst sources (signal, not volume)**
+
+Added high-signal, mostly-authoritative sources that feed analyzers which were
+previously running blind on headlines:
+
+- [x] **NSE bulk & block deals** (`nse_deals.py`) — surfaces only *notable*
+  deals (marquee-fund accumulation = bullish, promoter/PE offload = bearish);
+  routine prop churn is skipped. Feeds `BulkDealsAnalyzer`.
+- [x] **NSE insider trading / promoter pledge** (`nse_insider.py`) — promoter
+  buys/sells and pledge/encumbrance events, authoritative per-symbol. Feeds
+  `ShareholdingAnalyzer`.
+- [x] **USFDA drug enforcement** (`fda_collector.py`) — Class I/II recalls of
+  NSE-listed Indian pharma (firm→symbol mapped), as bearish catalysts.
+- [x] **PIB (Govt of India)** (`pib_collector.py`) — official policy/defence/
+  railways/capex releases, market-relevance filtered, feeding the thematic
+  engine (and reducing reliance on noisy global news feeds).
+- [x] **Brokerage radar** — added a Moneycontrol-targeted query.
+
+Each pure classifier core is offline unit-tested; every network collector fails
+gracefully (per-collector try/except), so a down endpoint never breaks a run.
   - **Investing.com disabled** — mostly macro/global/forex; low NSE-catalyst
     value and the main source of junk thematic matches.
   - **Brokerage Radar queries simplified** — the old heavy boolean/`site:`

@@ -22,8 +22,12 @@ from app.collectors.news_collectors.screener_collector import ScreenerCollector
 from app.collectors.news_collectors.thecore_earnings import TheCoreEarningsCollector
 from app.collectors.news_collectors.tijori_finance import TijoriFinanceCollector
 from app.collectors.news_collectors.zerodha_pulse import ZerodhaPulseCollector
+from app.collectors.news_collectors.pib_collector import PIBCollector
 from app.collectors.official_collectors.bse_announcements import BSEAnnouncementCollector
+from app.collectors.official_collectors.fda_collector import FDACollector
 from app.collectors.official_collectors.nse_announcements import NSEAnnouncementCollector
+from app.collectors.official_collectors.nse_deals import NSEDealsCollector
+from app.collectors.official_collectors.nse_insider import NSEInsiderCollector
 
 logger = logging.getLogger("newsedge.collectors.registry")
 
@@ -82,5 +86,13 @@ def build_default_registry() -> CollectorRegistry:
     # if NSE's API is unreachable, BSE covers the same dual-listed companies)
     registry.register(NSEAnnouncementCollector(enabled=True))
     registry.register(BSEAnnouncementCollector(enabled=True))
+
+    # Authoritative structured catalysts (post-market, stock-specific)
+    registry.register(NSEDealsCollector(enabled=True))       # bulk & block deals
+    registry.register(NSEInsiderCollector(enabled=True))     # insider trading / pledge
+    registry.register(FDACollector(enabled=True))            # USFDA pharma recalls
+
+    # Government policy / sector catalysts (feeds the thematic engine)
+    registry.register(PIBCollector(enabled=True))
 
     return registry
