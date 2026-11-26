@@ -112,6 +112,22 @@ previously running blind on headlines:
 Each pure classifier core is offline unit-tested; every network collector fails
 gracefully (per-collector try/except), so a down endpoint never breaks a run.
 
+**Classification quality**
+
+- [x] **Few-shot examples** in the system prompt (order win, bellwether modest
+  growth, SEBI penalty, retrospective rally, brokerage upgrade) — sharpens the
+  small local model's direction/category calls.
+- [x] **Objective confidence calibration** — the model's self-reported
+  confidence is replaced by one anchored to source authority, whether the stock
+  is actually named in the headline, presence of hard numbers, and speculative
+  language. (A 3B model can categorise but can't produce a calibrated
+  confidence number on its own.)
+- [x] **Deterministic inference** — temperature 0 + fixed seed, so re-runs don't
+  flip calls.
+- [x] **Per-event decision logging** — every candidate logs
+  `symbol: category/direction conf/impact -> score [tier]` so classifications
+  are auditable.
+
 **Endpoints verified live (27 Nov 2026):** NSE redirects `.com`→`.in` (the HTTP
 client follows it automatically). Confirmed working: corporate-announcements
 (ISIN is field `sm_isin`), `historicalOR/bulk-block-short-deals` for bulk/block

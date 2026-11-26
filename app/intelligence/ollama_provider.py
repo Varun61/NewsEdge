@@ -109,8 +109,10 @@ Summary: {content[:350]}
             "stream": False,
             "format": "json",
             "options": {
-                "temperature": 0.1,
-                "num_predict": 450,  # Generous token budget to avoid truncated JSON
+                "temperature": 0.0,   # deterministic classification across re-runs
+                "top_p": 1.0,
+                "seed": 42,
+                "num_predict": 450,   # generous budget to avoid truncated JSON
             },
         }
 

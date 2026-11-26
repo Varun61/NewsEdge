@@ -79,6 +79,18 @@ IMPORTANT:
 - Any news where the company is mentioned only incidentally = confidence ≤ 40
 - Gap-up exhaustion: note if positive news may already be priced in
 
+━━━ WORKED EXAMPLES (follow this calibration) ━━━
+1) "L&T bags ₹4,000 crore hydrocarbon order in Middle East"
+   -> {"nse_symbol":"LT","news_category":"ORDER_WIN","sentiment":"POSITIVE","impact_score":84,"confidence":82,"expected_direction":"bullish"}
+2) "HDFC Bank Q2 net profit rises 6% YoY to ₹16,800 crore"
+   -> {"nse_symbol":"HDFCBANK","news_category":"QUARTERLY_RESULTS","sentiment":"NEUTRAL","impact_score":52,"confidence":80,"expected_direction":"neutral"}  (single-digit growth in a bellwether = disappointment, not a buy)
+3) "SEBI imposes ₹25 crore penalty on XYZ for disclosure lapses"
+   -> {"nse_symbol":"XYZ","news_category":"REGULATORY_ACTION","sentiment":"VERY_NEGATIVE","impact_score":86,"confidence":90,"expected_direction":"bearish"}
+4) "ABC shares surge 12% after strong Q2 results"
+   -> {"nse_symbol":"ABC","news_category":"BUSINESS_UPDATE","sentiment":"NEUTRAL","impact_score":45,"confidence":50,"expected_direction":"neutral"}  (retrospective move already played out)
+5) "Brokerage CLSA upgrades PQR to Buy, raises target 20%"
+   -> {"nse_symbol":"PQR","news_category":"PROFIT_GROWTH","sentiment":"POSITIVE","impact_score":78,"confidence":80,"expected_direction":"bullish"}
+
 ━━━ OUTPUT FORMAT ━━━
 Return ONLY valid compact JSON (no markdown, no extra text):
 {
@@ -96,6 +108,47 @@ Return ONLY valid compact JSON (no markdown, no extra text):
   "risks": [string]
 }
 """
+
+
+_SPECULATIVE_MARKERS = (
+    "could ", "may ", "might ", "likely", "interview", "sees upside", "expects",
+    "expected to", "rumou", "in talks", "mulls", "plans to", "to consider",
+    "reportedly", "speculat", "weighing", "explores", "eyes ",
+)
+_QUANT_RE = re.compile(r"(?:₹|rs\.?|inr|usd|\$)\s*[\d,]+|\b\d+(?:\.\d+)?\s*%|\b\d[\d,]*\s*(?:crore|cr|lakh|million|billion|mn|bn)\b", re.IGNORECASE)
+
+
+def calibrate_confidence(llm_confidence: float, source_credibility: float, headline: str, symbol: str) -> float:
+    """Recompute classification confidence from OBJECTIVE signals instead of
+    trusting a small model's self-reported number.
+
+    Confidence = conviction the news is real, stock-specific, and material. We
+    blend the model's number with source authority, then adjust for whether the
+    stock is actually named in the headline, whether a hard number is present,
+    and whether the language is speculative.
+    """
+    try:
+        conf = max(10.0, min(95.0, float(llm_confidence)))
+    except (TypeError, ValueError):
+        conf = 55.0
+    cred_pct = max(0.0, min(1.0, float(source_credibility or 0.0))) * 100.0
+
+    h = (headline or "")
+    h_lower = h.lower()
+    sym = (symbol or "").strip()
+    grounded = bool(sym) and bool(re.search(rf"\b{re.escape(sym)}\b", h, re.IGNORECASE))
+    has_number = bool(_QUANT_RE.search(h))
+    speculative = any(m in h_lower for m in _SPECULATIVE_MARKERS)
+
+    # Anchor to source authority (an official filing should not be dragged down
+    # by a timid model, and a blog should not be inflated by a confident one).
+    conf = 0.6 * conf + 0.4 * cred_pct
+    conf += 6.0 if grounded else -8.0
+    if has_number:
+        conf += 5.0
+    if speculative:
+        conf -= 12.0
+    return round(max(10.0, min(95.0, conf)), 1)
 
 
 class BaseAIProvider(ABC):

@@ -443,6 +443,21 @@ class NewsClassifier:
                 event.primary_headline, comp_name, symbol, source_urls
             )
 
+        # Confidence calibration: replace the model's self-reported number with one
+        # anchored to objective signals (source authority, headline grounding,
+        # presence of hard numbers, speculative language).
+        if not thematic_matches:
+            try:
+                from app.intelligence.ai_provider import calibrate_confidence
+                _links = [l.article for l in event.article_links if l.article]
+                _avg_cred = (sum(a.source_credibility for a in _links) / len(_links)) if _links else 0.6
+                classification.confidence = calibrate_confidence(
+                    classification.confidence, _avg_cred, event.primary_headline,
+                    classification.nse_symbol or symbol,
+                )
+            except Exception:
+                pass
+
         # Dynamic company resolution: verify against official NSE equity universe
         if not event.primary_company_id:
             ai_symbol = _clean_symbol(classification.nse_symbol or "")
@@ -568,6 +583,15 @@ class NewsClassifier:
 
         # Score candidate
         analysis = self.scoring.score_event(event, classification, mat_score, session)
+        if analysis is not None:
+            logger.info(
+                "Classified #%d %s: %s/%s conf=%.0f impact=%.0f -> score=%.1f [%s]",
+                event.id,
+                event.primary_company.nse_symbol if event.primary_company else symbol,
+                classification.news_category, classification.expected_direction,
+                classification.confidence, classification.impact_score,
+                analysis.overall_score, analysis.classification.value,
+            )
         return analysis
 
     def process_batch(
