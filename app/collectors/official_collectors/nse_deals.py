@@ -27,14 +27,17 @@ logger = logging.getLogger("newsedge.collectors.nse_deals")
 _IST = pytz.timezone("Asia/Kolkata")
 _WARMUP = ("/report-detail/display-bulk-and-block-deals",)
 
-# Candidate endpoints (NSE has shuffled these; try in order, first JSON wins).
+# Candidate endpoints (first JSON wins). The `historicalOR/bulk-block-short-deals`
+# path is the one verified live (returns BD_* rows); the older `historical/*`
+# paths now 503, kept only as a fallback. NSE redirects .com->.in; requests
+# follows that automatically.
 _BULK_URLS = (
-    "https://www.nseindia.com/api/historical/bulk-deals?from={frm}&to={to}",
     "https://www.nseindia.com/api/historicalOR/bulk-block-short-deals?optionType=bulk_deals&from={frm}&to={to}",
+    "https://www.nseindia.com/api/historical/bulk-deals?from={frm}&to={to}",
 )
 _BLOCK_URLS = (
-    "https://www.nseindia.com/api/historical/block-deals?from={frm}&to={to}",
     "https://www.nseindia.com/api/historicalOR/bulk-block-short-deals?optionType=block_deals&from={frm}&to={to}",
+    "https://www.nseindia.com/api/historical/block-deals?from={frm}&to={to}",
 )
 
 # PE / promoter-style sellers that signal supply overhang on the SELL side.

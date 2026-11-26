@@ -83,68 +83,90 @@ class FDACollector(BaseCollector):
             return []
         logger.info("Collecting USFDA drug enforcement actions for Indian pharma...")
 
-        # openFDA report_date is day-granular; widen a little to catch recent actions.
-        start = (since.astimezone(timezone.utc) - timedelta(days=3)).strftime("%Y%m%d")
-        end = until.astimezone(timezone.utc).strftime("%Y%m%d")
-        params = {
-            "search": f"report_date:[{start}+TO+{end}]",
-            "limit": 100,
-        }
-        try:
-            resp = requests.get(_API, params=params, timeout=self.timeout_seconds)
-            if resp.status_code != 200:
-                logger.warning("openFDA returned HTTP %d", resp.status_code)
-                return []
-            results = resp.json().get("results", [])
-        except (requests.RequestException, ValueError) as exc:
-            logger.warning("openFDA fetch failed: %s", exc)
-            return []
+        # Query per firm, newest first (verified-working query shape). This avoids
+        # openFDA's date-range syntax (whose '+TO+' gets mangled by URL-encoding)
+        # and guarantees results are Indian-listed pharma only. openFDA updates
+        # weekly, so we accept recalls reported within a lenient recency window.
+        cutoff = (since.astimezone(timezone.utc) - timedelta(days=10)).strftime("%Y%m%d")
+
+        # One representative search term per NSE symbol (dedup the alias map).
+        query_firms: dict[str, str] = {}
+        for term, symbol in _FIRM_TO_SYMBOL.items():
+            if symbol and symbol not in query_firms.values():
+                query_firms[term] = symbol
 
         articles: List[CollectedArticle] = []
-        for r in results:
-            firm = (r.get("recalling_firm") or "").strip()
-            symbol = map_fda_firm_to_symbol(firm)
-            if not symbol:
-                continue
-            classification = (r.get("classification") or "").strip()  # Class I/II/III
-            # Only Class I/II are materially market-moving.
-            if classification not in ("Class I", "Class II"):
-                continue
+        seen: set = set()
+        import time
 
-            reason = (r.get("reason_for_recall") or "").strip()
-            product = (r.get("product_description") or "").strip()[:120]
-            impact = 82.0 if classification == "Class I" else 70.0
-            headline = f"{symbol} ({firm}): USFDA {classification} recall — {product}"
-
-            catalyst = {
-                "news_category": "REGULATORY_ACTION",
-                "direction": "bearish",
-                "impact_hint": impact,
-                "confidence": 90.0,
-                "is_material": True,
-                "summary": f"{classification} recall: {reason}"[:200],
-                "matched_rule": "usfda_recall",
-                "order_value_cr": None, "profit_growth_pct": None,
-                "revenue_growth_pct": None, "penalty_amount_cr": None,
-                "tags": ["usfda", "recall"],
+        for term, symbol in query_firms.items():
+            params = {
+                "search": f'recalling_firm:"{term}"',
+                "sort": "report_date:desc",
+                "limit": 5,
             }
-            articles.append(
-                CollectedArticle(
-                    headline=headline,
-                    article_url="https://www.accessdata.fda.gov/scripts/ires/index.cfm",
-                    source_name=self.source_name,
-                    published_at=datetime.now(timezone.utc),
-                    raw_content=f"{headline}. Reason: {reason}",
-                    extracted_text=f"{headline}. Reason: {reason}",
-                    company_mentions=[symbol, firm],
-                    credibility_score=self.credibility_score,
-                    authoritative_symbol=symbol,
-                    filing_catalyst=catalyst,
+            try:
+                resp = requests.get(_API, params=params, timeout=self.timeout_seconds)
+                if resp.status_code != 200:
+                    continue
+                results = resp.json().get("results", [])
+            except (requests.RequestException, ValueError) as exc:
+                logger.debug("openFDA fetch failed for %s: %s", term, exc)
+                continue
+
+            for r in results:
+                report_date = (r.get("report_date") or "").strip()
+                if report_date and report_date < cutoff:
+                    continue
+                classification = (r.get("classification") or "").strip()  # Class I/II/III
+                if classification not in ("Class I", "Class II"):
+                    continue
+
+                firm = (r.get("recalling_firm") or term).strip()
+                # Re-confirm the firm really maps to our symbol (guards fuzzy matches).
+                if map_fda_firm_to_symbol(firm) != symbol:
+                    continue
+
+                dedup_key = (symbol, r.get("recall_number") or r.get("event_id") or report_date)
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+
+                reason = (r.get("reason_for_recall") or "").strip()
+                product = (r.get("product_description") or "").strip()[:120]
+                impact = 82.0 if classification == "Class I" else 70.0
+                headline = f"{symbol} ({firm}): USFDA {classification} recall — {product}"
+
+                catalyst = {
+                    "news_category": "REGULATORY_ACTION",
+                    "direction": "bearish",
+                    "impact_hint": impact,
+                    "confidence": 90.0,
+                    "is_material": True,
+                    "summary": f"{classification} recall: {reason}"[:200],
+                    "matched_rule": "usfda_recall",
+                    "order_value_cr": None, "profit_growth_pct": None,
+                    "revenue_growth_pct": None, "penalty_amount_cr": None,
+                    "tags": ["usfda", "recall"],
+                }
+                articles.append(
+                    CollectedArticle(
+                        headline=headline,
+                        article_url="https://www.accessdata.fda.gov/scripts/ires/index.cfm",
+                        source_name=self.source_name,
+                        published_at=datetime.now(timezone.utc),
+                        raw_content=f"{headline}. Reason: {reason}",
+                        extracted_text=f"{headline}. Reason: {reason}",
+                        company_mentions=[symbol, firm],
+                        credibility_score=self.credibility_score,
+                        authoritative_symbol=symbol,
+                        filing_catalyst=catalyst,
+                    )
                 )
-            )
+            time.sleep(0.2)
 
         if articles:
-            logger.info("USFDA Enforcement: %d Class I/II recalls mapped to NSE pharma.", len(articles))
+            logger.info("USFDA Enforcement: %d recent Class I/II recalls mapped to NSE pharma.", len(articles))
         else:
-            logger.info("USFDA Enforcement: no material recalls for tracked Indian pharma in window.")
+            logger.info("USFDA Enforcement: no recent material recalls for tracked Indian pharma.")
         return articles

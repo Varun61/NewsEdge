@@ -94,8 +94,16 @@ previously running blind on headlines:
 - [x] **NSE insider trading / promoter pledge** (`nse_insider.py`) — promoter
   buys/sells and pledge/encumbrance events, authoritative per-symbol. Feeds
   `ShareholdingAnalyzer`.
-- [x] **USFDA drug enforcement** (`fda_collector.py`) — Class I/II recalls of
-  NSE-listed Indian pharma (firm→symbol mapped), as bearish catalysts.
+- [x] **USFDA drug enforcement** (`fda_collector.py`) — Class I/II **recalls** of
+  NSE-listed Indian pharma, queried per-firm via openFDA (verified live),
+  firm→symbol mapped, as bearish catalysts. (USFDA **warning letters / import
+  alerts** were requested but FDA's web backend is bot-blocked — a 302
+  "Apology" redirect — so a dedicated scraper isn't viable; those catalysts
+  still flow via the companies' own NSE Reg-30 filings + news, which the
+  historical-reactions profiles already key on.)
+- [ ] **SAST / takeover disclosures** — not added: the `corporate-sast`
+  endpoint returns 404; promoter pledge/selling (the high-value part) is already
+  covered by the insider (PIT) collector.
 - [x] **PIB (Govt of India)** (`pib_collector.py`) — official policy/defence/
   railways/capex releases, market-relevance filtered, feeding the thematic
   engine (and reducing reliance on noisy global news feeds).
@@ -103,6 +111,13 @@ previously running blind on headlines:
 
 Each pure classifier core is offline unit-tested; every network collector fails
 gracefully (per-collector try/except), so a down endpoint never breaks a run.
+
+**Endpoints verified live (27 Nov 2026):** NSE redirects `.com`→`.in` (the HTTP
+client follows it automatically). Confirmed working: corporate-announcements
+(ISIN is field `sm_isin`), `historicalOR/bulk-block-short-deals` for bulk/block
+deals (BD_* fields), `corporates-pit` for insider/pledge, PIB RSS, and openFDA
+per-firm enforcement. The older `historical/bulk-deals` path now 503s (kept only
+as a fallback after the working one).
   - **Investing.com disabled** — mostly macro/global/forex; low NSE-catalyst
     value and the main source of junk thematic matches.
   - **Brokerage Radar queries simplified** — the old heavy boolean/`site:`

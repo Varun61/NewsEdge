@@ -98,7 +98,8 @@ class NSEAnnouncementCollector(BaseCollector):
                 continue
 
             comp_name = (item.get("sm_name") or item.get("companyName") or symbol).strip()
-            isin = (item.get("isin") or "").strip() or None
+            # NSE announcement payload uses `sm_isin` (verified live).
+            isin = (item.get("sm_isin") or item.get("isin") or "").strip() or None
             # NSE field names vary: `desc` is the category/subject, `attchmntText`
             # (and sometimes `smIndustry`/`bdp_descriptor`) carry detail.
             subject = (item.get("desc") or item.get("bdp_descriptor") or "").strip()
