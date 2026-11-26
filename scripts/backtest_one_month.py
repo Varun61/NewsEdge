@@ -1,5 +1,15 @@
 """Comprehensive 1-Month Backtesting Engine for NewsEdge (Oct 1 to Nov 4, 2026).
 
+.. deprecated::
+    This backtester runs a *duplicated* copy of the pipeline over Google-News
+    headlines and does NOT reflect the filings-first classifier, realistic
+    fills, trading costs, or benchmark-relative returns. Its numbers are biased
+    (catalyst-only search universe, prev-close entry, no costs) and should be
+    treated as historical. Use ``scripts/backtest_filings.py`` instead, which
+    evaluates the real analyses the production pipeline stored, enters at the
+    next open, applies costs, and reports benchmark-relative results with
+    confidence intervals.
+
 Simulates daily 23:00 runs for each day over the past month:
 1. Gathers corporate news published on that date.
 2. Runs Entity Extraction, Classification, and Scoring pipelines.

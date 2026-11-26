@@ -51,10 +51,14 @@ corroboration, not the primary signal.
     (enter at next open, not prev close), round-trip costs (brokerage + STT +
     slippage), benchmark-relative excess return, and Wilson confidence intervals
     on the win rate. 12 offline tests.
-  - [ ] Orchestrator that drives it from the **real** classifier (the current
-    `scripts/backtest_one_month.py` runs a duplicated pipeline that bypasses the
-    collectors and the filings-first classifier, so it does **not** reflect
-    these changes).
+  - [x] **Honest orchestrator** (`scripts/backtest_filings.py`) — evaluates the
+    *real* `StockAnalysis` rows the production pipeline stored (no duplicated
+    scoring), fetches next-open bars + the Nifty benchmark, and runs them
+    through the evaluation core. Sample grows as you run the pipeline daily; on
+    a fresh DB it reports there is nothing to test. The old
+    `scripts/backtest_one_month.py` is now marked deprecated.
+
+Run it with: `python -m scripts.backtest_filings --days 30`
 
 > **Note on performance claims below:** the empirical backtest numbers in this
 > README predate the rework and are being re-validated with a corrected,
