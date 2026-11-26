@@ -28,19 +28,20 @@ def get_engine():
             echo=False,
             pool_pre_ping=True,
             connect_args=(
-                {"check_same_thread": False}
+                {"check_same_thread": False, "timeout": 30}
                 if "sqlite" in settings.database_url
                 else {}
             ),
         )
 
-        # Enable WAL mode and foreign keys for SQLite
+        # Enable WAL mode, busy_timeout and foreign keys for SQLite
         if "sqlite" in settings.database_url:
 
             @event.listens_for(_engine, "connect")
             def _set_sqlite_pragma(dbapi_connection, connection_record):
                 cursor = dbapi_connection.cursor()
                 cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=30000")
                 cursor.execute("PRAGMA foreign_keys=ON")
                 cursor.close()
 
