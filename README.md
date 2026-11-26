@@ -55,8 +55,8 @@ corroboration, not the primary signal.
     *real* `StockAnalysis` rows the production pipeline stored (no duplicated
     scoring), fetches next-open bars + the Nifty benchmark, and runs them
     through the evaluation core. Sample grows as you run the pipeline daily; on
-    a fresh DB it reports there is nothing to test. The old
-    `scripts/backtest_one_month.py` is now marked deprecated.
+    a fresh DB it reports there is nothing to test. The old duplicated
+    headline-based backtester has been removed.
 
 Run it with: `python -m scripts.backtest_filings --days 30`
 
@@ -345,19 +345,24 @@ Market already reacted — consider momentum only
 
 ---
 
-## 📊 Empirical Backtest Performance
+## 📊 Backtesting
 
-NewsEdge includes a rolling historical backtester (`scripts/backtest_one_month.py`) evaluated across the entire 2,362 NSE equity universe with cached daily OHLCV price bars:
+> **The previously published performance table has been retired.** It came from
+> a backtester that was methodologically biased (catalyst-only search universe,
+> prev-close entry, zero costs, thresholds tuned on the test window) and is not a
+> reliable estimate of live edge. That script has been removed.
 
-| Metric | Benchmark | Result | Takeaway |
-|:---|:---:|:---:|:---|
-| **Overall Directional Win Rate** | > 55.0% | **59.7%** (117 / 196) | Consistent statistical edge |
-| **Bullish Hit Rate** | > 55.0% | **61.0%** (50 / 82) | Strong institutional follow-through |
-| **Order Win Hit Rate** | > 65.0% | **75.0%** (6 / 8) | Highest alpha catalyst archetype |
-| **Strong Movers ($\ge 3\%$ move)** | 2:1 ratio | **49 Wins vs 27 Losses** | **1.81:1 Win-to-Loss Ratio** |
-| **Average Favorable Move** | > +2.00% | **+3.32%** | High reward capture on winners |
-| **Average Adverse Move** | < -3.00% | **-2.91%** | Well-contained risk on misses |
-| **Profit Factor / Asymmetry Ratio** | > 1.50x | **1.69x** | Highly profitable risk-reward profile |
+NewsEdge now ships an **honest backtester**, `scripts/backtest_filings.py`, which
+evaluates the *real* candidate analyses the production pipeline stored, enters at
+the next session open, applies round-trip costs, reports returns relative to the
+Nifty 50, and attaches a Wilson confidence interval to the win rate (see the
+"Honest filings-first backtest" section above). Its sample grows as you run the
+pipeline daily; on a fresh database it correctly reports there is nothing to
+test yet rather than printing fabricated numbers.
+
+```bash
+python -m scripts.backtest_filings --days 30
+```
 
 ---
 
@@ -440,8 +445,8 @@ python run_newsedge.py --hours 24
 # Headless / Scheduled Cron mode
 python run_newsedge.py --cron
 
-# Run rolling historical backtester
-python scripts/backtest_one_month.py --weeks 3
+# Run the honest filings-first backtester
+python -m scripts.backtest_filings --days 30
 ```
 
 ---
@@ -502,7 +507,7 @@ NewsEdge/
 │   └── custom_thematic_rules.json # Dynamic user-taught sector correlation rules
 ├── reports/                     # Generated markdown, JSON, HTML, and Groww watchlists
 ├── scripts/
-│   ├── backtest_one_month.py    # Rolling historical backtest engine with cached prices
+│   ├── backtest_filings.py      # Honest backtester (real analyses, costs, Nifty-relative, CI)
 │   ├── initialize_database.py   # Database seeder (sources, 2,362 stocks, aliases)
 │   └── audit_sources.py         # Source freshness & connectivity diagnostic tool
 ├── tests/                       # 44 automated pytest tests

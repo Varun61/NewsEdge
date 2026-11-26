@@ -1,8 +1,8 @@
 """Honest filings-first backtester.
 
-Unlike ``backtest_one_month.py`` (which runs a *duplicated* pipeline over
-Google-News headlines), this evaluates the **real** candidate analyses that the
-production pipeline already produced and stored in the database. It therefore
+Unlike the earlier headline-based backtester (which ran a *duplicated* pipeline
+over Google-News headlines), this evaluates the **real** candidate analyses that
+the production pipeline already produced and stored in the database. It therefore
 measures exactly what you would have been shown — no shadow scoring, no
 headline re-mining, no selection bias from catalyst-only search queries.
 
