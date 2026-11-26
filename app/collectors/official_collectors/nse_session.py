@@ -29,6 +29,15 @@ _BROWSER_HEADERS = {
     "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
+    # Client-hint headers Akamai inspects; their absence triggers the bot
+    # challenge (empty body) on some networks even after cookie priming.
+    "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
 }
 
 _HOME_URL = "https://www.nseindia.com"
@@ -113,6 +122,9 @@ def fetch_nse_json(
         "Accept": "application/json, text/plain, */*",
         "Referer": referer,
         "X-Requested-With": "XMLHttpRequest",
+        "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
         "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",

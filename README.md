@@ -130,6 +130,16 @@ gracefully (per-collector try/except), so a down endpoint never breaks a run.
 
 **Stale-news fixes (article recency ≠ catalyst recency)**
 
+- [x] **Stale large-cap earnings guard** — a bellwether earnings catalyst
+  (results/profit/revenue) that is *not* backed by an exchange filing and *not*
+  from a dedicated current-results source (Tijori / MarketByte / MC-Results /
+  The Core) is gated to WATCH-only. Kills weeks-old re-reports (e.g. Infosys /
+  HDFC Bank Q2 resurfacing in late November) leaking into the strong-bullish
+  list. Fresh results still flow via filings or the results scrapers.
+- [x] **NSE client-hint headers** — added `sec-ch-ua*` / `Sec-Fetch-*` to the
+  primed session; their absence triggers Akamai's empty-body bot challenge on
+  some networks even after cookie priming.
+
 - [x] **Undated RSS items dropped** — an entry with no parseable publish date
   used to bypass the window filter and leak in as "fresh" (`published_at=None`
   → treated as now). For a next-day picker, items that can't be placed in time

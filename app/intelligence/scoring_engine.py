@@ -329,6 +329,33 @@ class ScoringEngine:
             self._contextual_signals(event, event_symbol, direction, is_positive, is_negative, company)
         )
 
+        # ── STALE LARGE-CAP EARNINGS GUARD ────────────────────────────────
+        # Big-cap results get re-reported/analysed for weeks. A bellwether
+        # earnings catalyst that is NOT backed by an authoritative filing and
+        # NOT from a dedicated current-results source is very likely a weeks-old
+        # re-report (e.g. Infosys/HDFC Bank Q2 resurfacing in late November),
+        # not a fresh next-day catalyst. Gate it to WATCH_ONLY.
+        _EARNINGS_CATS = {"QUARTERLY_RESULTS", "PROFIT_GROWTH", "PROFIT_WARNING", "REVENUE_GROWTH"}
+        _FRESH_RESULTS_SOURCES = {
+            "Tijori Finance", "MarketByte", "Moneycontrol Results", "The Core Earnings",
+            "NSE Announcements", "BSE Announcements",
+        }
+        if cat_str in _EARNINGS_CATS and event_symbol in INSTITUTIONAL_BELLWETHERS:
+            filing_backed = False
+            srcs: set = set()
+            for link in event.article_links:
+                art = getattr(link, "article", None)
+                if not art:
+                    continue
+                cm = art.company_mentions
+                if isinstance(cm, dict) and cm.get("authoritative_symbol"):
+                    filing_backed = True
+                src = getattr(art, "source", None)
+                if src and getattr(src, "name", None):
+                    srcs.add(src.name)
+            if not filing_backed and not (srcs & _FRESH_RESULTS_SOURCES):
+                penalties["stale_largecap_earnings_unconfirmed"] = -16.0
+
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 
         # 5. Hard minimum-confidence gate — if we can't verify the company, exclude from watchlist
@@ -377,6 +404,9 @@ class ScoringEngine:
             candidate_class = _watch(final_score)
         elif "stale_or_recap_reference" in penalties:
             # Recap/preview/analysis of an old or future event — track, don't trade
+            candidate_class = _watch(final_score)
+        elif "stale_largecap_earnings_unconfirmed" in penalties:
+            # Likely a weeks-old bellwether earnings re-report (no filing / results source)
             candidate_class = _watch(final_score)
         elif "body_only_mention" in penalties and final_score < p.override_body_only:
             # Company was not in the headline; avoid recommending body passing mentions as high conviction trades
