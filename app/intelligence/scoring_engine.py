@@ -418,6 +418,26 @@ class ScoringEngine:
         except Exception:
             pass
 
+        # ── TRADEABLE LIQUIDITY GATE ──────────────────────────────────────
+        # A next-morning pick is only useful if it can actually be traded at the
+        # open. Thin names are penalised; micro-caps are gated to WATCH_ONLY.
+        try:
+            from app.intelligence.liquidity_gate import evaluate_liquidity
+            if event_symbol:
+                mcap_cat = None
+                mcap_cr = None
+                if company is not None:
+                    if getattr(company, "market_cap_category", None) is not None:
+                        mcap_cat = company.market_cap_category.value
+                    mcap_cr = getattr(company, "market_cap", None)
+                liq = evaluate_liquidity(event_symbol, mcap_cat, mcap_cr)
+                if not liq.is_tradeable:
+                    penalties["illiquid_untradeable"] = liq.score_modifier
+                elif liq.score_modifier < 0:
+                    penalties[f"liquidity_{liq.tier.lower()}"] = liq.score_modifier
+        except Exception:
+            pass
+
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 
         # 5. Hard minimum-confidence gate — if we can't verify the company, exclude from watchlist
@@ -451,6 +471,9 @@ class ScoringEngine:
 
         if is_thematic_secondary:
             # Secondary basket picks from sector themes are sympathy tracking items, not primary trade recommendations
+            candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
+        elif "illiquid_untradeable" in penalties:
+            # Micro-cap: too thin for a reliable intraday fill — tracking only, never actionable
             candidate_class = CandidateClassification.WATCH_ONLY if final_score >= 46.0 else CandidateClassification.EXCLUDED
         elif "routine_calendar_event" in penalties:
             # Ex-dividend lists and general calendar updates belong in Watch Only

@@ -40,8 +40,16 @@ corroboration, not the primary signal.
   authoritative filing, the classifier resolves the company from the filing's
   own symbol/ISIN and scores it from the exchange-categorised catalyst instead
   of re-guessing from headline regex.
-- [ ] Source-priority ranking + tradeable-liquidity gate.
-- [ ] Methodologically correct backtest + honest performance reporting.
+- [x] **Tradeable-liquidity gate** — picks are classified into liquidity tiers
+  (F&O / large / mid / small / micro) from F&O membership + market-cap data;
+  thin names are penalised and micro-caps are hard-gated to tracking-only so the
+  watchlist never surfaces a stock you can't realistically fill at the open.
+  (Source priority is already emergent: filings carry top credibility, so the
+  deduplicator makes the filing primary and the classifier keys off it.)
+- [ ] Methodologically correct backtest + honest performance reporting. The
+  current `scripts/backtest_one_month.py` has its own duplicated pipeline that
+  bypasses the collectors and the filings-first classifier, so it does **not**
+  yet reflect these changes.
 
 > **Note on performance claims below:** the empirical backtest numbers in this
 > README predate the rework and are being re-validated with a corrected,
