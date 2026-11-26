@@ -72,8 +72,9 @@ def build_default_registry() -> CollectorRegistry:
     registry.register(ScreenerCollector(enabled=True))
     registry.register(BrokerageRadarCollector(enabled=True))
 
-    # Official exchange announcements
+    # Official exchange announcements (authoritative filings, with redundancy:
+    # if NSE's API is unreachable, BSE covers the same dual-listed companies)
     registry.register(NSEAnnouncementCollector(enabled=True))
-    registry.register(BSEAnnouncementCollector(enabled=False))
+    registry.register(BSEAnnouncementCollector(enabled=True))
 
     return registry

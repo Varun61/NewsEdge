@@ -60,6 +60,18 @@ corroboration, not the primary signal.
 
 Run it with: `python -m scripts.backtest_filings --days 30`
 
+**Reliability & data-accuracy fixes**
+
+- [x] **NSE API Referer/XHR headers** — the API returns an empty bot-challenge
+  body without a matching `Referer` + `X-Requested-With`; restored so filings
+  actually flow (confirmed from a live run that was silently getting 0 filings).
+- [x] **BSE announcements fallback** — a real BSE corporate-filings collector is
+  now enabled alongside NSE for redundancy (same dual-listed companies); NSE
+  symbol is resolved by name and only tagged authoritative when it resolves
+  confidently. If NSE is unreachable, BSE keeps the filings-first path alive.
+- [x] **NSE→yfinance ticker remap** — renamed tickers (e.g. `ZOMATO`→`ETERNAL`)
+  no longer silently drop the price/trend signals.
+
 > **Note on performance claims below:** the empirical backtest numbers in this
 > README predate the rework and are being re-validated with a corrected,
 > cost-aware, bias-controlled backtest. Treat them as provisional until the
