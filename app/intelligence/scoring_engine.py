@@ -63,6 +63,29 @@ INSTITUTIONAL_BELLWETHERS = {
 # in-code default above when present.
 INSTITUTIONAL_BELLWETHERS = load_set("institutional_bellwethers", INSTITUTIONAL_BELLWETHERS)
 
+# Categories that, at high confidence, carry a genuine next-day directional
+# edge (quantified order wins, earnings beats/misses, M&A, regulatory events).
+_STRONG_CATALYSTS = {
+    "ORDER_WIN", "PROFIT_GROWTH", "REVENUE_GROWTH", "REGULATORY_APPROVAL",
+    "ACQUISITION", "MERGER", "REGULATORY_ACTION", "FRAUD_OR_GOVERNANCE",
+    "PROFIT_WARNING",
+}
+
+# If any of these penalties fired, the catalyst is tainted (unquantified,
+# stale, body-only, low-quality growth, illiquid, etc.) and must NOT receive
+# the high-conviction quality boost.
+_REDFLAGS = {
+    "unquantified_order_win", "body_only_mention", "stale_or_recap_reference",
+    "stale_largecap_earnings_unconfirmed", "order_book_not_new_order",
+    "margin_compression", "subpar_growth_deceleration",
+    "flat_growth_deceleration", "revenue_profit_divergence",
+    "exceptional_items_inflation", "largecap_modest_growth",
+    "speculative_forecast", "past_price_action_exhaustion",
+    "management_caution_tone", "negative_forward_guidance",
+    "routine_calendar_event", "routine_low_signal", "long_gestation_capex",
+    "tiny_absolute_profit", "illiquid_untradeable",
+}
+
 
 class ScoringEngine:
     """Calculates overall 0-100 score and assigns candidate priority."""
@@ -355,6 +378,20 @@ class ScoringEngine:
                     srcs.add(src.name)
             if not filing_backed and not (srcs & _FRESH_RESULTS_SOURCES):
                 penalties["stale_largecap_earnings_unconfirmed"] = -16.0
+
+        # ── HIGH-CONVICTION QUALITY BOOST ─────────────────────────────────
+        # A genuinely strong, quantified catalyst from a high-confidence
+        # classification, with a clear direction and NO tainting red flags,
+        # earns a positive modifier so it can clear the actionable cutoff.
+        # This is a quality reward, not a threshold loosening: tainted or
+        # low-quality catalysts (see _REDFLAGS) are excluded by construction.
+        if (
+            cat_str in _STRONG_CATALYSTS
+            and float(classification.confidence) >= 85.0
+            and (is_positive or is_negative)
+            and not (set(penalties) & _REDFLAGS)
+        ):
+            penalties["high_conviction_catalyst"] = 8.0
 
         final_score = max(0.0, min(100.0, raw_score + sum(penalties.values())))
 

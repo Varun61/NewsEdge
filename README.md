@@ -191,6 +191,17 @@ gracefully (per-collector try/except), so a down endpoint never breaks a run.
   literals across `score_event` (and duplicated in the old backtest) now live in
   one `ScoringPolicy` dataclass. Behaviour-preserving extraction; the engine is
   now tunable from one place and the magic numbers are named and documented.
+- [x] **High-conviction quality tuning** — two changes let genuinely strong,
+  high-confidence catalysts reach *actionable* instead of being stranded in
+  Watch-Only when filings are unavailable: (1) the `unquantified_order_win`
+  penalty is softened at confidence ≥ 85 (`-6` vs `-12`), since a near-certain
+  order win should not be buried for lacking a rupee figure in the headline;
+  (2) a `high_conviction_catalyst` **positive** modifier (`+8`) is added when a
+  strong category (order win, profit/revenue growth, regulatory, M&A, profit
+  warning) classified at confidence ≥ 85 has a clear direction and **no**
+  tainting red-flag penalty. This is a quality reward, not a threshold
+  loosening — tainted, stale, body-only, low-growth, or illiquid catalysts are
+  excluded by construction (see `_REDFLAGS`).
 
 **Endpoints verified live (27 Nov 2026):** NSE redirects `.com`→`.in` (the HTTP
 client follows it automatically). Confirmed working: corporate-announcements

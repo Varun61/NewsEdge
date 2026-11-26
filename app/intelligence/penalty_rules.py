@@ -103,11 +103,13 @@ def compute_headline_penalties(ctx: PenaltyContext) -> Dict[str, float]:
     if any(re.search(pat, headline_lower) for pat in margin_compression_patterns):
         penalties["margin_compression"] = -18.0
 
-    # Unquantified order win (no monetary value)
+    # Unquantified order win (no monetary value). A highly-confident source
+    # reporting an order is likely real even if the headline omits the figure,
+    # so penalise it less (the value is usually in the body).
     if cat_str == "ORDER_WIN":
         has_rupee_amount = bool(re.search(r"(?:rs\.?|inr|₹|usd|\$)\s*[\d,]+(?:\.\d+)?\s*(?:crore|cr|million|billion|mn|bn)\b", headline_lower))
         if not has_rupee_amount:
-            penalties["unquantified_order_win"] = -12.0
+            penalties["unquantified_order_win"] = -6.0 if ctx.confidence >= 85.0 else -12.0
 
     # "Order book"/backlog/pipeline is a CUMULATIVE figure (analysis), not a fresh
     # order win catalyst (e.g. "Can X's ₹47,000cr order book power growth?").

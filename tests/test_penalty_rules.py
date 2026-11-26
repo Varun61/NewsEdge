@@ -101,3 +101,15 @@ def test_clean_quantified_bullish_has_minimal_penalties():
     for bad in ("unquantified_order_win", "body_only_mention", "margin_compression",
                 "stale_or_recap_reference", "past_price_action_exhaustion"):
         assert bad not in p
+
+
+def test_unquantified_order_penalty_softens_at_high_confidence():
+    # High-confidence unquantified order win is penalised less harshly, so a
+    # genuinely strong catalyst can still reach actionable.
+    high = compute_headline_penalties(
+        ctx("ABC secures large order", cat_str="ORDER_WIN", confidence=90.0, symbol="ABC"))
+    low = compute_headline_penalties(
+        ctx("ABC secures large order", cat_str="ORDER_WIN", confidence=70.0, symbol="ABC"))
+    assert high["unquantified_order_win"] == -6.0
+    assert low["unquantified_order_win"] == -12.0
+    assert high["unquantified_order_win"] > low["unquantified_order_win"]
